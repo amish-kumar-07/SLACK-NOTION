@@ -98,7 +98,7 @@ REDIS_URL=redis://localhost:6379
 Run backend:
 
 ```bash
-npm run dev
+npm start
 ```
 
 ---
@@ -171,3 +171,4 @@ MIT
 
 
 Tell which section you want next.
+
