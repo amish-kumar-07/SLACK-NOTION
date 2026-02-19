@@ -4,6 +4,9 @@ import { useToast } from "./ToastContext";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL!;
 
+// ========================================
+// TYPES
+// ========================================
 export interface SendMessagePayload {
     type: "message:send";
     data: {
@@ -18,6 +21,34 @@ export interface SendMessagePayload {
     };
 }
 
+export interface IncomingMessage {
+    type: string;
+    data?: {
+        channelId: string;
+        content: string;
+        userId: string;
+        userEmail: string;
+        timestamp: string;
+        tempId?: string;
+        threadId?: string | null;
+        parentMessageId?: string | null;
+        attachments?: unknown[];
+    };
+    // For USER_JOINED / USER_LEFT events
+    userId?: string;
+    userEmail?: string;
+    timestamp?: string;
+    // For CHANNEL_JOINED
+    workspaceId?: string;
+    channelId?: string;
+    roomId?: string;
+    // For errors
+    message?: string;
+}
+
+// Callback type for subscribers
+type MessageCallback = (message: IncomingMessage) => void;
+
 type WSContextType = {
     isConnected: boolean;
     connect: () => void;
@@ -25,14 +56,27 @@ type WSContextType = {
     joinChannel: (workspaceId: string, channelId: string) => void;
     leaveChannel: (workspaceId: string, channelId: string) => void;
     sendMessage: (payload: SendMessagePayload) => void;
+    /** Subscribe to incoming WebSocket messages. Returns an unsubscribe function. */
+    subscribe: (callback: MessageCallback) => () => void;
 };
 
 const WSContext = createContext<WSContextType | null>(null);
 
+// ========================================
+// PROVIDER
+// ========================================
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const socketRef = useRef<WebSocket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const toast = useToast();
+
+    // Subscriber registry: all components that want to listen to messages
+    const subscribersRef = useRef<Set<MessageCallback>>(new Set());
+
+    // Dispatch incoming messages to all subscribers
+    const dispatch = useCallback((message: IncomingMessage) => {
+        subscribersRef.current.forEach((cb) => cb(message));
+    }, []);
 
     const connect = useCallback(() => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -70,10 +114,17 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             setIsConnected(false);
         };
 
+        // ✅ KEY CHANGE: Dispatch all incoming messages to subscribers
         socket.onmessage = (event) => {
-            console.log('📨 Message received:', event.data);
+            try {
+                const message: IncomingMessage = JSON.parse(event.data);
+                console.log('📨 Message received:', message);
+                dispatch(message);
+            } catch (err) {
+                console.error('❌ Failed to parse incoming WebSocket message:', err);
+            }
         };
-    }, [toast]);
+    }, [toast, dispatch]);
 
     const disconnect = useCallback(() => {
         if (socketRef.current) {
@@ -90,7 +141,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
-        console.log(`📍 Joining channel: ${channelId} in workspace: ${workspaceId}`);
+        console.log(`🔍 Joining channel: ${channelId} in workspace: ${workspaceId}`);
         socketRef.current.send(JSON.stringify({
             type: 'JOIN_CHANNEL',
             workspaceId,
@@ -103,7 +154,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             return;
         }
 
-        console.log(`📍 Leaving channel: ${channelId}`);
+        console.log(`🔍 Leaving channel: ${channelId}`);
         socketRef.current.send(JSON.stringify({
             type: 'LEAVE_CHANNEL',
             workspaceId,
@@ -120,22 +171,31 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         socketRef.current.send(JSON.stringify(payload));
     }, []);
 
+    // ✅ KEY CHANGE: subscribe/unsubscribe system
+    const subscribe = useCallback((callback: MessageCallback): (() => void) => {
+        subscribersRef.current.add(callback);
+        // Return an unsubscribe function
+        return () => {
+            subscribersRef.current.delete(callback);
+        };
+    }, []);
+
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
             disconnect();
         };
     }, [disconnect]);
 
+    // Ping every 25 seconds to keep connection alive
     useEffect(() => {
         if (!isConnected || !socketRef.current) return;
 
         const interval = setInterval(() => {
             if (socketRef.current?.readyState === WebSocket.OPEN) {
-                socketRef.current.send(
-                    JSON.stringify({ type: "PING" })
-                );
+                socketRef.current.send(JSON.stringify({ type: "PING" }));
             }
-        }, 25000); // 25 seconds (safe default)
+        }, 25000);
 
         return () => {
             clearInterval(interval);
@@ -149,7 +209,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             disconnect,
             joinChannel,
             leaveChannel,
-            sendMessage
+            sendMessage,
+            subscribe,
         }}>
             {children}
         </WSContext.Provider>

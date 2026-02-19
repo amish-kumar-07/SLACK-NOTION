@@ -96,3 +96,19 @@ export async function isWorkspaceMember(
     return false;
   }
 }
+
+
+export async function isValidWorkspace(workspaceId : string , channelId : string , userId : string){
+   try
+   { 
+      setTimeout(()=>{
+        console.log("All Okay");
+      },100);
+      return true;
+   }
+   catch(err)
+   {
+     console.log(err);
+     return null;
+   }
+}
