@@ -168,6 +168,3 @@ Amish Kumar
 MIT
 
 ---
-
-
-Tell which section you want next.
