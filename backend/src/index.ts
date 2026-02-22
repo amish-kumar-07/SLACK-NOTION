@@ -4,6 +4,7 @@ import authRouter from "./controllers/auth/index.js";
 import workspace from "./controllers/workspace/index.js";
 import channel from "./controllers/channel/index.js";
 import invite from "./controllers/invite/index.js";
+import mssg from "./controllers/message/index.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import { setupWebSocket } from "./controllers/ws/channel/index.js";  // ← Import WebSocket setup
 import cors from "cors";
@@ -26,6 +27,7 @@ app.use("/auth", authRouter);
 app.use("/workspace", workspace);
 app.use("/channel", channel);
 app.use("/invite",invite);
+app.use("/message",mssg);
 
 // Health check
 app.get('/health', (req, res) => {

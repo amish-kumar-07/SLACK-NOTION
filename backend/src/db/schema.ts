@@ -107,9 +107,6 @@ export const messagesTable = pgTable("messages", {
 
   content: text("content"),
 
-  // For threads (Slack-style)
-  threadId: uuid("thread_id"),
-
   parentMessageId: uuid("parent_message_id"),
 
   attachments: jsonb("attachments").default([]),

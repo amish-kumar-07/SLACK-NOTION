@@ -11,6 +11,7 @@ import {
   getSocketMetadata,
   removeSocket,
 } from "../../../utils/Redis.js";
+import { saveMessage } from "../../../services/message/index.js";
 
 // ========================================
 // LOCAL STATE (Per Server Instance)
@@ -224,7 +225,7 @@ export function setupWebSocket(server: Server) {
             isValid = !!(await isValidWorkspace(
               message.workspaceId,
               message.channelId,
-              userId
+              userId,
             ));
           } catch (err) {
             console.error("❌ isValidWorkspace threw:", err);
@@ -234,13 +235,18 @@ export function setupWebSocket(server: Server) {
 
           if (!isValid) {
             console.warn(
-              `🚫 Access denied: ${userEmail} → workspace=${message.workspaceId} channel=${message.channelId}`
+              `🚫 Access denied: ${userEmail} → workspace=${message.workspaceId} channel=${message.channelId}`,
             );
             sendError(ws, "Access denied to workspace/channel");
             break;
           }
 
-          await handleJoinChannel(ws, socketId, message.workspaceId, message.channelId);
+          await handleJoinChannel(
+            ws,
+            socketId,
+            message.workspaceId,
+            message.channelId,
+          );
           break;
         }
 
@@ -250,14 +256,22 @@ export function setupWebSocket(server: Server) {
             sendError(ws, "LEAVE_CHANNEL requires workspaceId and channelId");
             break;
           }
-          await handleLeaveChannel(ws, socketId, message.workspaceId, message.channelId);
+          await handleLeaveChannel(
+            ws,
+            socketId,
+            message.workspaceId,
+            message.channelId,
+          );
           break;
         }
 
         // ----------------------------------
         case "message:send": {
           if (!isSendMessage(message)) {
-            sendError(ws, "message:send requires data.channelId and data.content");
+            sendError(
+              ws,
+              "message:send requires data.channelId and data.content",
+            );
             break;
           }
           await handleSendMessage(socketId, message.data);
@@ -266,7 +280,9 @@ export function setupWebSocket(server: Server) {
 
         // ----------------------------------
         default:
-          console.log(`⚠️ Unknown message type from ${userEmail}: ${message?.type}`);
+          console.log(
+            `⚠️ Unknown message type from ${userEmail}: ${message?.type}`,
+          );
       }
     });
 
@@ -275,7 +291,7 @@ export function setupWebSocket(server: Server) {
     // ----------------------------------------
     ws.on("close", async (code, reason) => {
       console.log(
-        `🔌 WebSocket closed: ${userEmail} (socketId: ${socketId}) code=${code} reason=${reason?.toString()}`
+        `🔌 WebSocket closed: ${userEmail} (socketId: ${socketId}) code=${code} reason=${reason?.toString()}`,
       );
 
       // Remove from local map immediately
@@ -327,14 +343,16 @@ async function handleJoinChannel(
   ws: WebSocket,
   socketId: string,
   workspaceId: string,
-  channelId: string
+  channelId: string,
 ): Promise<void> {
   const roomId = `${workspaceId}:${channelId}`;
 
   try {
     const meta = await getSocketMetadata(socketId);
     if (!meta) {
-      console.error(`❌ handleJoinChannel: socket ${socketId} not found in Redis`);
+      console.error(
+        `❌ handleJoinChannel: socket ${socketId} not found in Redis`,
+      );
       sendError(ws, "Session not found. Please reconnect.");
       return;
     }
@@ -379,14 +397,16 @@ async function handleLeaveChannel(
   ws: WebSocket,
   socketId: string,
   workspaceId: string,
-  channelId: string
+  channelId: string,
 ): Promise<void> {
   const roomId = `${workspaceId}:${channelId}`;
 
   try {
     const meta = await getSocketMetadata(socketId);
     if (!meta) {
-      console.error(`❌ handleLeaveChannel: socket ${socketId} not found in Redis`);
+      console.error(
+        `❌ handleLeaveChannel: socket ${socketId} not found in Redis`,
+      );
       return;
     }
 
@@ -412,7 +432,10 @@ async function handleLeaveChannel(
 
     console.log(`✅ ${meta.userEmail} successfully left room ${roomId}`);
   } catch (error) {
-    console.error(`❌ handleLeaveChannel failed for socket ${socketId}:`, error);
+    console.error(
+      `❌ handleLeaveChannel failed for socket ${socketId}:`,
+      error,
+    );
   }
 }
 
@@ -426,12 +449,14 @@ async function handleLeaveChannel(
  */
 async function handleSendMessage(
   socketId: string,
-  data: SendMessagePayload["data"]
+  data: SendMessagePayload["data"],
 ): Promise<void> {
   try {
     const meta = await getSocketMetadata(socketId);
     if (!meta) {
-      console.error(`❌ handleSendMessage: socket ${socketId} not found in Redis`);
+      console.error(
+        `❌ handleSendMessage: socket ${socketId} not found in Redis`,
+      );
       return;
     }
 
@@ -439,7 +464,7 @@ async function handleSendMessage(
     if (!meta.currentRoom) {
       console.warn(
         `⚠️ handleSendMessage: socket ${socketId} (${meta.userEmail}) is not in any room. ` +
-        `They must send JOIN_CHANNEL before sending messages.`
+          `They must send JOIN_CHANNEL before sending messages.`,
       );
 
       const ws = socketConnections.get(socketId);
@@ -449,17 +474,31 @@ async function handleSendMessage(
       return;
     }
 
-    console.log(`💬 ${meta.userEmail} → room ${meta.currentRoom}: "${data.content.slice(0, 60)}"`);
+    // Save Message in the db
+    const savedMessage = await saveMessage({
+      userId: meta.userId,
+      channelId: data.channelId,
+      content: data.content,
+      parentMessageId: data.parentMessageId ?? null,
+      attachments: data.attachments ?? [],
+    });
+
+    console.log(
+      `💬 ${meta.userEmail} → room ${meta.currentRoom}: "${data.content.slice(0, 60)}"`,
+    );
 
     // Broadcast to entire room — userId/userEmail come from Redis (trusted), not the client
+    // index.ts — handleSendMessage
     await broadcastToRoom(meta.currentRoom, {
       type: "message:receive",
       data: {
-        ...data,
-        // Override client-provided identity with server-verified identity
+        id: savedMessage?.id, // real DB id
+        tempId: data.tempId, // ← so sender can reconcile
+        channelId: data.channelId, // ← so frontend channel filter passes
         userId: meta.userId,
         userEmail: meta.userEmail,
-        timestamp: new Date().toISOString(),
+        content: data.content,
+        timestamp: savedMessage?.createdAt ?? new Date().toISOString(),
       },
     });
   } catch (error) {
@@ -482,7 +521,9 @@ async function broadcastToRoom(roomId: string, message: object): Promise<void> {
       return;
     }
 
-    console.log(`📡 Broadcasting to room ${roomId} (${socketIds.length} socket(s))`);
+    console.log(
+      `📡 Broadcasting to room ${roomId} (${socketIds.length} socket(s))`,
+    );
 
     let sent = 0;
     let skipped = 0;
@@ -493,7 +534,9 @@ async function broadcastToRoom(roomId: string, message: object): Promise<void> {
       if (!ws) {
         // Socket registered in Redis but not on this server instance.
         // In a multi-server setup you'd use a pub/sub layer here.
-        console.warn(`⚠️ Socket ${socketId} in Redis but not in local map (stale or different instance)`);
+        console.warn(
+          `⚠️ Socket ${socketId} in Redis but not in local map (stale or different instance)`,
+        );
         skipped++;
         continue;
       }

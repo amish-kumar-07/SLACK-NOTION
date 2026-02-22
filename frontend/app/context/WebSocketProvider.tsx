@@ -24,6 +24,7 @@ export interface SendMessagePayload {
 export interface IncomingMessage {
     type: string;
     data?: {
+        [x: string]: string | undefined;
         channelId: string;
         content: string;
         userId: string;

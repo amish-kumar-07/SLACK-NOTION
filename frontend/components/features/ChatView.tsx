@@ -206,7 +206,7 @@ export const ChatView = ({ workspaceId, channelId }: ChatViewProps) => {
                     const isCurrentUser = msg.user.id === user?.id;
                     const avatarGradient = getAvatarGradient(msg.user.id);
                     const displayName = isCurrentUser ? "You" : msg.user.name;
-                    const initial = msg.user.name.charAt(0).toUpperCase();
+                    const initial = msg.user?.name?.charAt(0)?.toUpperCase();
 
                     return (
                         <div
