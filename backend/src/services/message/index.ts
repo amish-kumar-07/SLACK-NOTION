@@ -43,6 +43,7 @@ export type GetMessagesInput = {
   channelId: string;
   cursor?: string; // optional — omitted entirely when not paginating
   limit?: number;
+  name?: string;
 };
 
 type MessageWithUser = {
@@ -51,6 +52,7 @@ type MessageWithUser = {
   channelId: string;
   userId: string;
   parentMessageId: string | null;
+  name : string | null ;
   attachments: unknown;
   createdAt: Date;
   user: {
@@ -73,6 +75,7 @@ export async function getMessages(data: GetMessagesInput): Promise<{
       channelId: messagesTable.channelId,
       userId: messagesTable.userId,
       parentMessageId: messagesTable.parentMessageId,
+      name : messagesTable.channelName,
       attachments: messagesTable.attachments,
       createdAt: messagesTable.createdAt,
       user: {
@@ -87,6 +90,7 @@ export async function getMessages(data: GetMessagesInput): Promise<{
       and(
         eq(messagesTable.channelId, data.channelId),
         isNull(messagesTable.deletedAt),
+        data.name ? eq(messagesTable.channelName, data.name) : undefined,
         data.cursor
           ? lt(messagesTable.createdAt, new Date(data.cursor))
           : undefined,

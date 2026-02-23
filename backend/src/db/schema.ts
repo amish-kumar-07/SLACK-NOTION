@@ -101,6 +101,8 @@ export const messagesTable = pgTable("messages", {
     .notNull()
     .references(() => Channels.id, { onDelete: "cascade" }),
 
+  channelName: varchar("channelName", { length: 255 }).notNull().default("general"),
+
   userId: uuid("userId")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
