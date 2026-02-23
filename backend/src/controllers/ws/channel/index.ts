@@ -41,6 +41,7 @@ interface SendMessagePayload {
   type: "message:send";
   data: {
     channelId: string;
+    channelName: string;
     userId: string;
     content: string;
     tempId?: string;
@@ -80,7 +81,8 @@ function isSendMessage(m: any): m is SendMessagePayload {
     m?.type === "message:send" &&
     typeof m.data?.content === "string" &&
     m.data.content.trim().length > 0 &&
-    typeof m.data?.channelId === "string"
+    typeof m.data?.channelId === "string" &&
+    typeof m.data?.channelName === "string"   // ✅ ADD THIS
   );
 }
 
@@ -478,6 +480,7 @@ async function handleSendMessage(
     const savedMessage = await saveMessage({
       userId: meta.userId,
       channelId: data.channelId,
+      channelName: data.channelName,   // ✅ ADD THIS
       content: data.content,
       parentMessageId: data.parentMessageId ?? null,
       attachments: data.attachments ?? [],
@@ -495,6 +498,7 @@ async function handleSendMessage(
         id: savedMessage?.id, // real DB id
         tempId: data.tempId, // ← so sender can reconcile
         channelId: data.channelId, // ← so frontend channel filter passes
+        channelName: data.channelName,
         userId: meta.userId,
         userEmail: meta.userEmail,
         content: data.content,

@@ -10,6 +10,7 @@ import { and, eq, lt, desc, isNull } from "drizzle-orm";
 type SaveMessageInput = {
   userId: string;
   channelId: string;
+  channelName: string;   // ✅ ADD THIS
   content: string;
   parentMessageId?: string | null;
   attachments?: unknown[];
@@ -22,6 +23,7 @@ export async function saveMessage(data: SaveMessageInput) {
       .values({
         userId: data.userId,
         channelId: data.channelId,
+        channelName : data.channelName,
         content: data.content,
         parentMessageId: data.parentMessageId ?? null,
         attachments: data.attachments ?? [],

@@ -11,6 +11,7 @@ export interface SendMessagePayload {
     type: "message:send";
     data: {
         channelId: string;
+        channelName: string;
         userId: string;
         content: string;
         threadId?: string | null;
@@ -24,7 +25,6 @@ export interface SendMessagePayload {
 export interface IncomingMessage {
     type: string;
     data?: {
-        [x: string]: string | undefined;
         channelId: string;
         content: string;
         userId: string;

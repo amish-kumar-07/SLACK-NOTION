@@ -30,6 +30,7 @@ interface Message {
 type ChatViewProps = {
     workspaceId: string;
     channelId: string;
+    channelName: string; 
 };
 
 // ========================================
@@ -66,7 +67,7 @@ function getAvatarGradient(seed: string): string {
 // ========================================
 // COMPONENT
 // ========================================
-export const ChatView = ({ workspaceId, channelId }: ChatViewProps) => {
+export const ChatView = ({ workspaceId, channelId , channelName }: ChatViewProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState("");
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -172,6 +173,7 @@ export const ChatView = ({ workspaceId, channelId }: ChatViewProps) => {
             type: "message:send",
             data: {
                 channelId,
+                channelName,
                 userId: user.id,
                 content,
                 tempId,

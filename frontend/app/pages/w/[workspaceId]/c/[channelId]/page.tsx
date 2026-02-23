@@ -12,7 +12,7 @@ import { useWebSocket } from "@/app/context/WebSocketProvider";
 type WorkspaceMode = "chat" | "documents";
 
 const modeNames = {
-  chat: "#general",
+  chat: "general",
   documents: "Project Roadmap 2024",
   whiteboard: "System Architecture",
 };
@@ -68,7 +68,7 @@ export default function WorkspacePage() {
   const renderContent = () => {
     switch (activeMode) {
       case "chat":
-        return (<ChatView workspaceId={workspaceId} channelId={channelId} />);
+        return (<ChatView workspaceId={workspaceId} channelId={channelId} channelName= {modeNames.chat}/>);
       case "documents":
         return <DocumentsView />;
       default:
