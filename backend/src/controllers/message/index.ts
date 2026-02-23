@@ -3,11 +3,12 @@ import { Router } from "express";
 import { AppError } from "../../utils/AppError.js";
 import { getMessages } from "../../services/message/index.js";
 import type { GetMessagesInput } from "../../services/message/index.js";
+import { authMiddleware } from "../../middlewares/authHandler.js";
 
 const mssg = Router();
 
 // GET /message/getMessages?channelId=xxx&cursor=yyy&limit=30
-mssg.get("/getMessages", async (req, res, next) => {
+mssg.get("/getMessages", authMiddleware ,async (req, res, next) => {
     try {
         const { channelId, cursor, limit } = req.query;
 
