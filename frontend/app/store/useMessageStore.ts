@@ -6,12 +6,20 @@ export interface MessageUser {
   email: string;
 }
 
+export interface ParentMessage {
+  id: string;
+  content: string | null;
+  userId: string;
+  userName: string;
+}
+
 export interface Message {
   id: string;
   content: string;
   channelId: string;
   userId: string;
   parentMessageId: string | null;
+  parentMessage: ParentMessage | null; // ✅ snapshot from DB — reply badge never shows "Unknown"
   name: string;
   attachments: string[];
   createdAt: string;
@@ -37,6 +45,8 @@ interface MessageStore {
   updateMessage: (channelId: string, messageId: string, newContent: string) => void;
   /** ✅ NEW: Removes a message from the store */
   deleteMessage: (channelId: string, messageId: string) => void;
+  /** ✅ NEW: Looks up a single message by id — used by reply badge to show quoted content */
+  getMessageById: (channelId: string, messageId: string) => Message | undefined;
   isChannelFetched: (channelId: string) => boolean;
 }
 
@@ -177,5 +187,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   isChannelFetched: (channelId) => {
     return get().channels[channelId]?.isFetched ?? false;
+  },
+
+  // ✅ NEW: Looks up a single message by id — used by the reply badge
+  getMessageById: (channelId, messageId) => {
+    return get().channels[channelId]?.messages.find((m) => m.id === messageId);
   },
 }));

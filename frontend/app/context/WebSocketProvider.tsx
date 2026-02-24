@@ -26,7 +26,7 @@ export interface IncomingMessage {
     type: string;
     data?: {
         id?: string;
-        messageId?: string;       // ✅ for message:edited and message:deleted events
+        messageId?: string;       // for message:edited and message:deleted events
         channelId: string;
         content: string;
         userId: string;
@@ -35,6 +35,13 @@ export interface IncomingMessage {
         tempId?: string;
         threadId?: string | null;
         parentMessageId?: string | null;
+        // ✅ parent message snapshot — so reply badge works for incoming WS messages too
+        parentMessage?: {
+            id: string;
+            content: string | null;
+            userId: string;
+            userName: string;
+        } | null;
         attachments?: unknown[];
     };
     // For USER_JOINED / USER_LEFT events

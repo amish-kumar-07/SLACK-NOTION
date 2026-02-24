@@ -155,6 +155,9 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
             channelId: serverMsg.channelId,
             userId: serverMsg.userId,
             parentMessageId: serverMsg.parentMessageId ?? null,
+            // parentMessage snapshot comes from DB on page load; for optimistic messages
+            // we pass null here — the badge still shows from replyingTo state while composing
+            parentMessage: serverMsg.parentMessage ?? null,
             name: channelName,
             attachments: [],
             createdAt: serverMsg.timestamp,
@@ -167,6 +170,7 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
             channelId: serverMsg.channelId,
             userId: serverMsg.userId,
             parentMessageId: serverMsg.parentMessageId ?? null,
+            parentMessage: serverMsg.parentMessage ?? null,
             name: channelName,
             attachments: [],
             createdAt: serverMsg.timestamp,
@@ -209,6 +213,10 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
       channelId,
       userId: user.id,
       parentMessageId: replyingTo?.id ?? null,
+      // Build parentMessage snapshot from replyingTo so badge shows instantly while optimistic
+      parentMessage: replyingTo
+        ? { id: replyingTo.id, content: replyingTo.content, userId: "", userName: replyingTo.userName }
+        : null,
       name: channelName,
       attachments: [],
       createdAt,
@@ -360,11 +368,16 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                   <span className="text-xs text-gray-400">{formatTime(msg.createdAt)}</span>
                 </div>
 
-                {/* Reply context badge */}
-                {msg.parentMessageId && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
-                    <Reply className="w-3 h-3" />
-                    <span>Replying to a message</span>
+                {/* Reply context badge — uses parentMessage snapshot from DB, always accurate */}
+                {msg.parentMessageId && msg.parentMessage && (
+                  <div className="flex items-center gap-1.5 text-xs mb-1 bg-slate-800/60 border-l-2 border-purple-500/50 rounded px-2 py-1 max-w-sm">
+                    <Reply className="w-3 h-3 shrink-0 text-purple-400" />
+                    <span className="text-purple-400 font-medium shrink-0">
+                      {msg.parentMessage.userId === user?.id ? "You" : msg.parentMessage.userName}:
+                    </span>
+                    <span className="truncate text-gray-500">
+                      {msg.parentMessage.content || "📎 Attachment"}
+                    </span>
                   </div>
                 )}
 

@@ -11,7 +11,7 @@ import {
   getSocketMetadata,
   removeSocket,
 } from "../../../utils/Redis.js";
-import { saveMessage, editMessage, deleteMessage } from "../../../services/message/index.js";
+import { saveMessage, editMessage, deleteMessage, replyMessage, getParentMessageSnapshot } from "../../../services/message/index.js";
 
 // ========================================
 // LOCAL STATE (Per Server Instance)
@@ -537,19 +537,36 @@ async function handleSendMessage(
       return;
     }
 
-    // Save Message in the db
-    const savedMessage = await saveMessage({
-      userId: meta.userId,
-      channelId: data.channelId,
-      channelName: data.channelName,
-      content: data.content,
-      parentMessageId: data.parentMessageId ?? null,
-      attachments: data.attachments ?? [],
-    });
+    // Save message — use replyMessage service when it's a reply (has parentMessageId)
+    // so the parent-exists validation runs. Otherwise use saveMessage for regular messages.
+    const savedMessage = data.parentMessageId
+      ? await replyMessage({
+          channelId: data.channelId,
+          channelName: data.channelName,
+          content: data.content,
+          userId: meta.userId,
+          parentMessageId: data.parentMessageId,
+          attachments: data.attachments ?? [],
+        })
+      : await saveMessage({
+          userId: meta.userId,
+          channelId: data.channelId,
+          channelName: data.channelName,
+          content: data.content,
+          parentMessageId: null,
+          attachments: data.attachments ?? [],
+        });
 
     console.log(
       `💬 ${meta.userEmail} → room ${meta.currentRoom}: "${data.content.slice(0, 60)}"`,
     );
+
+    // If this is a reply, fetch the parent snapshot so the reply badge
+    // renders correctly for ALL recipients immediately — including the sender
+    // after reconciliation replaces the optimistic message.
+    const parentMessage = data.parentMessageId
+      ? await getParentMessageSnapshot(data.parentMessageId)
+      : null;
 
     // Broadcast to entire room — userId/userEmail come from Redis (trusted), not the client
     await broadcastToRoom(meta.currentRoom, {
@@ -562,6 +579,8 @@ async function handleSendMessage(
         userId: meta.userId,
         userEmail: meta.userEmail,
         content: data.content,
+        parentMessageId: data.parentMessageId ?? null,
+        parentMessage, // ✅ real DB snapshot — never null for replies
         timestamp: savedMessage?.createdAt ?? new Date().toISOString(),
       },
     });

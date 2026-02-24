@@ -2,6 +2,7 @@
 import { db } from "../../db/index.js";
 import { messagesTable, usersTable } from "../../db/schema.js";
 import { and, eq, lt, desc, isNull } from "drizzle-orm";
+import { alias as aliasedTable } from "drizzle-orm/pg-core";
 
 // ========================================
 // saveMessage
@@ -62,6 +63,13 @@ type MessageWithUser = {
     name: string;
     email: string;
   };
+  // ✅ Snapshot of the parent message — so reply badge always works regardless of pagination
+  parentMessage: {
+    id: string;
+    content: string | null;
+    userId: string;
+    userName: string;
+  } | null;
 };
 
 export async function getMessages(data: GetMessagesInput): Promise<{
@@ -69,6 +77,10 @@ export async function getMessages(data: GetMessagesInput): Promise<{
   nextCursor: string | null;
 }> {
   const limit = data.limit ?? 30;
+
+  // Aliases for the self-join on parent message + parent message author
+  const parentMessages = aliasedTable(messagesTable, "parent_messages");
+  const parentUsers = aliasedTable(usersTable, "parent_users");
 
   const rows = await db
     .select({
@@ -85,9 +97,19 @@ export async function getMessages(data: GetMessagesInput): Promise<{
         name: usersTable.name,
         email: usersTable.email,
       },
+      // ✅ Pull parent message snapshot so reply badge always has data
+      parentMessage: {
+        id: parentMessages.id,
+        content: parentMessages.content,
+        userId: parentMessages.userId,
+        userName: parentUsers.name,
+      },
     })
     .from(messagesTable)
     .innerJoin(usersTable, eq(messagesTable.userId, usersTable.id))
+    // LEFT JOIN so regular messages (no parent) still come through
+    .leftJoin(parentMessages, eq(messagesTable.parentMessageId, parentMessages.id))
+    .leftJoin(parentUsers, eq(parentMessages.userId, parentUsers.id))
     .where(
       and(
         eq(messagesTable.channelId, data.channelId),
@@ -102,7 +124,22 @@ export async function getMessages(data: GetMessagesInput): Promise<{
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
-  const pageRows = (hasMore ? rows.slice(0, limit) : rows).reverse();
+  const rawRows = (hasMore ? rows.slice(0, limit) : rows).reverse();
+
+  // ✅ Normalize parentMessage: Drizzle LEFT JOIN returns an object with all-null fields
+  // when there is no parent. We collapse that into a clean null so the badge logic is simple.
+  const pageRows = rawRows.map((row) => ({
+    ...row,
+    parentMessage:
+      row.parentMessage?.id != null
+        ? {
+            id: row.parentMessage.id,
+            content: row.parentMessage.content,
+            userId: row.parentMessage.userId,
+            userName: row.parentMessage.userName,
+          }
+        : null,
+  }));
 
   // ✅ Guard against empty array before index access — fixes "Object is possibly undefined"
   const firstRow = pageRows[0];
@@ -167,17 +204,52 @@ export async function deleteMessage(
   }
 }
 
+
+// ========================================
+// getParentMessageSnapshot
+// Used by the WS server to attach parent message data to the broadcast
+// so the reply badge renders correctly for all recipients immediately.
+// ========================================
+export async function getParentMessageSnapshot(parentMessageId: string): Promise<{
+  id: string;
+  content: string | null;
+  userId: string;
+  userName: string;
+} | null> {
+  try {
+    const rows = await db
+      .select({
+        id: messagesTable.id,
+        content: messagesTable.content,
+        userId: messagesTable.userId,
+        userName: usersTable.name,
+      })
+      .from(messagesTable)
+      .innerJoin(usersTable, eq(messagesTable.userId, usersTable.id))
+      .where(eq(messagesTable.id, parentMessageId))
+      .limit(1);
+
+    return rows[0] ?? null;
+  } catch (err) {
+    console.error("❌ getParentMessageSnapshot error:", err);
+    return null;
+  }
+}
 //Reply Message function
 export async function replyMessage({
   channelId,
+  channelName,
   content,
   userId,
   parentMessageId,
+  attachments,
 }: {
   channelId: string;
+  channelName: string;  // ✅ required — schema has channelName notNull
   content: string;
   userId: string;
   parentMessageId?: string;
+  attachments?: unknown[];
 }) {
   try {
     // Optional validation: ensure parent exists
@@ -197,9 +269,11 @@ export async function replyMessage({
       .insert(messagesTable)
       .values({
         channelId,
+        channelName,  // ✅ required by schema
         content,
         userId,
         parentMessageId: parentMessageId ?? null,
+        attachments: attachments ?? [],
         createdAt: new Date(),
       })
       .returning();
