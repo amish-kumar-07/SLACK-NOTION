@@ -11,7 +11,7 @@ import {
   getSocketMetadata,
   removeSocket,
 } from "../../../utils/Redis.js";
-import { saveMessage } from "../../../services/message/index.js";
+import { saveMessage, editMessage, deleteMessage } from "../../../services/message/index.js";
 
 // ========================================
 // LOCAL STATE (Per Server Instance)
@@ -52,11 +52,32 @@ interface SendMessagePayload {
   };
 }
 
+// ✅ NEW: Edit message payload
+interface EditMessagePayload {
+  type: "message:edit";
+  data: {
+    messageId: string;
+    channelId: string;
+    content: string;
+  };
+}
+
+// ✅ NEW: Delete message payload
+interface DeleteMessagePayload {
+  type: "message:delete";
+  data: {
+    messageId: string;
+    channelId: string;
+  };
+}
+
 type IncomingMessage =
   | { type: "PING" }
   | JoinChannelMessage
   | LeaveChannelMessage
-  | SendMessagePayload;
+  | SendMessagePayload
+  | EditMessagePayload    // ✅ NEW
+  | DeleteMessagePayload; // ✅ NEW
 
 function isJoinChannel(m: any): m is JoinChannelMessage {
   return (
@@ -82,7 +103,27 @@ function isSendMessage(m: any): m is SendMessagePayload {
     typeof m.data?.content === "string" &&
     m.data.content.trim().length > 0 &&
     typeof m.data?.channelId === "string" &&
-    typeof m.data?.channelName === "string"   // ✅ ADD THIS
+    typeof m.data?.channelName === "string"
+  );
+}
+
+// ✅ NEW
+function isEditMessage(m: any): m is EditMessagePayload {
+  return (
+    m?.type === "message:edit" &&
+    typeof m.data?.messageId === "string" &&
+    typeof m.data?.channelId === "string" &&
+    typeof m.data?.content === "string" &&
+    m.data.content.trim().length > 0
+  );
+}
+
+// ✅ NEW
+function isDeleteMessage(m: any): m is DeleteMessagePayload {
+  return (
+    m?.type === "message:delete" &&
+    typeof m.data?.messageId === "string" &&
+    typeof m.data?.channelId === "string"
   );
 }
 
@@ -277,6 +318,26 @@ export function setupWebSocket(server: Server) {
             break;
           }
           await handleSendMessage(socketId, message.data);
+          break;
+        }
+
+        // ✅ NEW: Edit message
+        case "message:edit": {
+          if (!isEditMessage(message)) {
+            sendError(ws, "message:edit requires data.messageId, data.channelId, and data.content");
+            break;
+          }
+          await handleEditMessage(ws, socketId, message.data);
+          break;
+        }
+
+        // ✅ NEW: Delete message
+        case "message:delete": {
+          if (!isDeleteMessage(message)) {
+            sendError(ws, "message:delete requires data.messageId and data.channelId");
+            break;
+          }
+          await handleDeleteMessage(ws, socketId, message.data);
           break;
         }
 
@@ -480,7 +541,7 @@ async function handleSendMessage(
     const savedMessage = await saveMessage({
       userId: meta.userId,
       channelId: data.channelId,
-      channelName: data.channelName,   // ✅ ADD THIS
+      channelName: data.channelName,
       content: data.content,
       parentMessageId: data.parentMessageId ?? null,
       attachments: data.attachments ?? [],
@@ -491,13 +552,12 @@ async function handleSendMessage(
     );
 
     // Broadcast to entire room — userId/userEmail come from Redis (trusted), not the client
-    // index.ts — handleSendMessage
     await broadcastToRoom(meta.currentRoom, {
       type: "message:receive",
       data: {
-        id: savedMessage?.id, // real DB id
-        tempId: data.tempId, // ← so sender can reconcile
-        channelId: data.channelId, // ← so frontend channel filter passes
+        id: savedMessage?.id,
+        tempId: data.tempId,
+        channelId: data.channelId,
         channelName: data.channelName,
         userId: meta.userId,
         userEmail: meta.userEmail,
@@ -507,6 +567,105 @@ async function handleSendMessage(
     });
   } catch (error) {
     console.error(`❌ handleSendMessage failed for socket ${socketId}:`, error);
+  }
+}
+
+// ✅ NEW
+/**
+ * message:edit
+ *
+ * Flow:
+ * 1. Get sender metadata from Redis
+ * 2. Verify sender is in a room
+ * 3. Update the message in DB via editMessage service
+ * 4. Broadcast message:edited to entire room
+ */
+async function handleEditMessage(
+  ws: WebSocket,
+  socketId: string,
+  data: EditMessagePayload["data"],
+): Promise<void> {
+  try {
+    const meta = await getSocketMetadata(socketId);
+    if (!meta) {
+      console.error(`❌ handleEditMessage: socket ${socketId} not found in Redis`);
+      return;
+    }
+
+    if (!meta.currentRoom) {
+      sendError(ws, "You must join a channel before editing messages.");
+      return;
+    }
+
+    const updated = await editMessage(data.messageId, data.channelId, data.content);
+    if (!updated || updated.length === 0) {
+      sendError(ws, "Failed to edit message. It may not exist.");
+      return;
+    }
+
+    console.log(`✏️ ${meta.userEmail} edited message ${data.messageId}`);
+
+    // Broadcast the confirmed edit to everyone in the room
+    await broadcastToRoom(meta.currentRoom, {
+      type: "message:edited",
+      data: {
+        messageId: data.messageId,
+        channelId: data.channelId,
+        content: data.content,
+        userId: meta.userId,
+      },
+    });
+  } catch (error) {
+    console.error(`❌ handleEditMessage failed for socket ${socketId}:`, error);
+  }
+}
+
+// ✅ NEW
+/**
+ * message:delete
+ *
+ * Flow:
+ * 1. Get sender metadata from Redis
+ * 2. Verify sender is in a room
+ * 3. Delete the message in DB via deleteMessage service
+ * 4. Broadcast message:deleted to entire room
+ */
+async function handleDeleteMessage(
+  ws: WebSocket,
+  socketId: string,
+  data: DeleteMessagePayload["data"],
+): Promise<void> {
+  try {
+    const meta = await getSocketMetadata(socketId);
+    if (!meta) {
+      console.error(`❌ handleDeleteMessage: socket ${socketId} not found in Redis`);
+      return;
+    }
+
+    if (!meta.currentRoom) {
+      sendError(ws, "You must join a channel before deleting messages.");
+      return;
+    }
+
+    const deleted = await deleteMessage(data.messageId, data.channelId);
+    if (!deleted) {
+      sendError(ws, "Failed to delete message. It may not exist.");
+      return;
+    }
+
+    console.log(`🗑️ ${meta.userEmail} deleted message ${data.messageId}`);
+
+    // Broadcast the confirmed delete to everyone in the room
+    await broadcastToRoom(meta.currentRoom, {
+      type: "message:deleted",
+      data: {
+        messageId: data.messageId,
+        channelId: data.channelId,
+        userId: meta.userId,
+      },
+    });
+  } catch (error) {
+    console.error(`❌ handleDeleteMessage failed for socket ${socketId}:`, error);
   }
 }
 

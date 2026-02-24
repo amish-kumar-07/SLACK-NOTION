@@ -26,6 +26,7 @@ export interface IncomingMessage {
     type: string;
     data?: {
         id?: string;
+        messageId?: string;       // ✅ for message:edited and message:deleted events
         channelId: string;
         content: string;
         userId: string;

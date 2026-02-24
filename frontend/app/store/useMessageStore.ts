@@ -33,6 +33,10 @@ interface MessageStore {
   appendMessage: (channelId: string, message: Message) => void;
   /** Replaces the optimistic message (matched by tempId) with the server-confirmed version */
   reconcileMessage: (channelId: string, tempId: string, confirmedMessage: Message) => void;
+  /** ✅ NEW: Updates the content of an existing message in place */
+  updateMessage: (channelId: string, messageId: string, newContent: string) => void;
+  /** ✅ NEW: Removes a message from the store */
+  deleteMessage: (channelId: string, messageId: string) => void;
   isChannelFetched: (channelId: string) => boolean;
 }
 
@@ -127,6 +131,44 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           [channelId]: {
             ...existing,
             messages: updated,
+          },
+        },
+      };
+    });
+  },
+
+  // ✅ NEW: Updates content of a message in place — used when edit is confirmed
+  updateMessage: (channelId, messageId, newContent) => {
+    set((state) => {
+      const existing = state.channels[channelId];
+      if (!existing) return state;
+
+      return {
+        channels: {
+          ...state.channels,
+          [channelId]: {
+            ...existing,
+            messages: existing.messages.map((m) =>
+              m.id === messageId ? { ...m, content: newContent } : m
+            ),
+          },
+        },
+      };
+    });
+  },
+
+  // ✅ NEW: Removes a message from the list — used when delete is confirmed
+  deleteMessage: (channelId, messageId) => {
+    set((state) => {
+      const existing = state.channels[channelId];
+      if (!existing) return state;
+
+      return {
+        channels: {
+          ...state.channels,
+          [channelId]: {
+            ...existing,
+            messages: existing.messages.filter((m) => m.id !== messageId),
           },
         },
       };

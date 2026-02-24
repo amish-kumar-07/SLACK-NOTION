@@ -114,3 +114,99 @@ export async function getMessages(data: GetMessagesInput): Promise<{
     nextCursor,
   };
 }
+
+//Edit Message function
+export async function editMessage(
+  messageId: string,
+  channelId: string,
+  content: string
+) {
+  try {
+    const res = await db
+      .update(messagesTable)
+      .set({
+        content: content,
+        updatedAt: new Date(), // recommended
+      })
+      .where(
+        and(
+          eq(messagesTable.id, messageId),
+          eq(messagesTable.channelId, channelId)
+        )
+      )
+      .returning();
+
+    return res;
+  } catch (err) {
+    console.log(err);
+    return null;
+  }
+}
+
+
+//Delete Message function
+export async function deleteMessage(
+  messageId: string,
+  channelId: string
+) {
+  try {
+    const res = await db
+      .delete(messagesTable)
+      .where(
+        and(
+          eq(messagesTable.id, messageId),
+          eq(messagesTable.channelId, channelId)
+        )
+      )
+      .returning();
+
+    return res[0] ?? null; // return deleted message
+  } catch (err) {
+    console.log(err);
+    return null;
+  }
+}
+
+//Reply Message function
+export async function replyMessage({
+  channelId,
+  content,
+  userId,
+  parentMessageId,
+}: {
+  channelId: string;
+  content: string;
+  userId: string;
+  parentMessageId?: string;
+}) {
+  try {
+    // Optional validation: ensure parent exists
+    if (parentMessageId) {
+      const parent = await db
+        .select()
+        .from(messagesTable)
+        .where(eq(messagesTable.id, parentMessageId))
+        .limit(1);
+
+      if (!parent.length) {
+        throw new Error("Parent message not found");
+      }
+    }
+
+    const res = await db
+      .insert(messagesTable)
+      .values({
+        channelId,
+        content,
+        userId,
+        parentMessageId: parentMessageId ?? null,
+        createdAt: new Date(),
+      })
+      .returning();
+
+    return res[0];
+  } catch (err) {
+    console.log(err);
+    return null;
+  }
+}
