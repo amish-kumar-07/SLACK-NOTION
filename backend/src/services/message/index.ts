@@ -8,13 +8,22 @@ import { alias as aliasedTable } from "drizzle-orm/pg-core";
 // saveMessage
 // ========================================
 
+type Attachment = {
+  id: string;
+  url: string;
+  name: string;
+  type: string; // 'image/jpeg', etc.
+  size: number; // bytes
+  uploadedAt: string; // ISO date
+};
+
 type SaveMessageInput = {
   userId: string;
   channelId: string;
   channelName: string;   // ✅ ADD THIS
   content: string;
   parentMessageId?: string | null;
-  attachments?: unknown[];
+  attachments?: Attachment[];
 };
 
 export async function saveMessage(data: SaveMessageInput) {

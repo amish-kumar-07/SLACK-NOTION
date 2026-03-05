@@ -37,6 +37,15 @@ interface LeaveChannelMessage {
   channelId: string;
 }
 
+type Attachment = {
+  id: string;
+  url: string;
+  name: string;
+  type: string;
+  size: number;
+  uploadedAt: string;
+};
+
 interface SendMessagePayload {
   type: "message:send";
   data: {
@@ -48,7 +57,7 @@ interface SendMessagePayload {
     createdAt?: string;
     threadId?: string | null;
     parentMessageId?: string | null;
-    attachments?: unknown[];
+    attachments?: Attachment[];
   };
 }
 
