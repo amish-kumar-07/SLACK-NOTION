@@ -13,15 +13,25 @@ export interface ParentMessage {
   userName: string;
 }
 
+// Matches the shape returned by POST /upload
+export interface Attachment {
+  id: string;
+  url: string;
+  name: string;
+  type: string;
+  size: number;
+  uploadedAt: string;
+}
+
 export interface Message {
   id: string;
   content: string;
   channelId: string;
   userId: string;
   parentMessageId: string | null;
-  parentMessage: ParentMessage | null; // ✅ snapshot from DB — reply badge never shows "Unknown"
+  parentMessage: ParentMessage | null;
   name: string;
-  attachments: string[];
+  attachments: Attachment[];
   createdAt: string;
   user: MessageUser;
 }
@@ -41,11 +51,11 @@ interface MessageStore {
   appendMessage: (channelId: string, message: Message) => void;
   /** Replaces the optimistic message (matched by tempId) with the server-confirmed version */
   reconcileMessage: (channelId: string, tempId: string, confirmedMessage: Message) => void;
-  /** ✅ NEW: Updates the content of an existing message in place */
+  /** Updates the content of an existing message in place */
   updateMessage: (channelId: string, messageId: string, newContent: string) => void;
-  /** ✅ NEW: Removes a message from the store */
+  /** Removes a message from the store */
   deleteMessage: (channelId: string, messageId: string) => void;
-  /** ✅ NEW: Looks up a single message by id — used by reply badge to show quoted content */
+  /** Looks up a single message by id */
   getMessageById: (channelId: string, messageId: string) => Message | undefined;
   isChannelFetched: (channelId: string) => boolean;
 }
@@ -94,7 +104,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const existing = state.channels[channelId];
       if (!existing) return state;
 
-      // Deduplicate by id
+      // Deduplicate by id — prevents double-render on fast sends
       const alreadyExists = existing.messages.some((m) => m.id === message.id);
       if (alreadyExists) return state;
 
@@ -110,8 +120,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     });
   },
 
-  // ✅ Replaces the temp optimistic message with the server-confirmed one
-  // This prevents duplicate messages for the sender
   reconcileMessage: (channelId, tempId, confirmedMessage) => {
     set((state) => {
       const existing = state.channels[channelId];
@@ -119,7 +127,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       const idx = existing.messages.findIndex((m) => m.id === tempId);
       if (idx === -1) {
-        // Optimistic message not found — just append (edge case)
+        // Optimistic message not found — just append (edge case: very fast server response)
         return {
           channels: {
             ...state.channels,
@@ -131,7 +139,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         };
       }
 
-      // Replace the optimistic message at its position
+      // Replace the optimistic message at its exact position (preserves order)
       const updated = [...existing.messages];
       updated[idx] = confirmedMessage;
 
@@ -147,7 +155,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     });
   },
 
-  // ✅ NEW: Updates content of a message in place — used when edit is confirmed
   updateMessage: (channelId, messageId, newContent) => {
     set((state) => {
       const existing = state.channels[channelId];
@@ -167,7 +174,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     });
   },
 
-  // ✅ NEW: Removes a message from the list — used when delete is confirmed
   deleteMessage: (channelId, messageId) => {
     set((state) => {
       const existing = state.channels[channelId];
@@ -189,7 +195,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     return get().channels[channelId]?.isFetched ?? false;
   },
 
-  // ✅ NEW: Looks up a single message by id — used by the reply badge
   getMessageById: (channelId, messageId) => {
     return get().channels[channelId]?.messages.find((m) => m.id === messageId);
   },

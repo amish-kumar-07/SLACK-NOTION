@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { Send, Paperclip, Smile, AtSign, FileText, PenTool, MoreHorizontal, Reply, Pencil, Trash2 } from "lucide-react";
+import {
+  Send, Paperclip, Smile, AtSign, FileText,
+  PenTool, MoreHorizontal, Reply, Pencil, Trash2, X, Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWebSocket, IncomingMessage, SendMessagePayload } from "@/app/context/WebSocketProvider";
 import { useAuth } from "@/app/context/AuthContext";
 import { useMessages } from "@/app/hooks/useMessages";
-import { useMessageStore } from "@/app/store/useMessageStore";
+import { useMessageStore, Attachment, Message } from "@/app/store/useMessageStore";
+import axios from "axios";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 // ========================================
 // TYPES
@@ -18,8 +24,11 @@ type ChatViewProps = {
 };
 
 // ========================================
-// HELPERS
+// MODULE-LEVEL PURE HELPERS
+// Defined outside the component — stable references, never recreated on render.
+// This is the correct pattern for utility functions that don't need React state.
 // ========================================
+
 function formatTime(isoString: string): string {
   try {
     return new Date(isoString).toLocaleTimeString([], {
@@ -47,6 +56,38 @@ function getAvatarGradient(seed: string): string {
   return gradients[Math.abs(hash) % gradients.length];
 }
 
+/**
+ * "rashusingh110@gmail.com" → "Rashusingh110"
+ * Used wherever we only have an email but need a display name.
+ */
+function nameFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? email;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+/**
+ * Normalizes the attachments field from the server.
+ * WS broadcast may send full Attachment objects (new upload flow) or
+ * plain URL strings (legacy DB rows). Handles both safely.
+ */
+function normalizeAttachments(raw: unknown[] | undefined): Attachment[] {
+  if (!raw || raw.length === 0) return [];
+  return raw.map((item): Attachment => {
+    if (typeof item === "string") {
+      const fileName = decodeURIComponent(item.split("/").pop() ?? "file");
+      return {
+        id: item,
+        url: item,
+        name: fileName,
+        type: "application/octet-stream",
+        size: 0,
+        uploadedAt: "",
+      };
+    }
+    return item as Attachment;
+  });
+}
+
 // ========================================
 // COMPONENT
 // ========================================
@@ -63,11 +104,23 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
   const menuRef = useRef<HTMLDivElement>(null);
 
   // ── Reply state ──
-  const [replyingTo, setReplyingTo] = useState<{ id: string; content: string; userName: string } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{
+    id: string;
+    content: string;
+    userName: string;
+  } | null>(null);
 
   // ── Edit state ──
-  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{
+    id: string;
+    content: string;
+  } | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Attachment state ──
+  const [pendingAttachment, setPendingAttachment] = useState<Attachment | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Scroll refs ──
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -84,12 +137,13 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     }
   }, [messages.length]);
 
-  // ─── Reset on channel change ──────────────────────────────────────────────
+  // ─── Reset all local state on channel change ──────────────────────────────
   useEffect(() => {
     isFirstLoad.current = true;
     setActiveMenu(null);
     setReplyingTo(null);
     setEditingMessage(null);
+    setPendingAttachment(null);
   }, [channelId]);
 
   // ─── Close menu on outside click ─────────────────────────────────────────
@@ -139,43 +193,40 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
   }, [hasMore, isLoadingMore, handleLoadMore]);
 
   // ─── WebSocket subscriber ─────────────────────────────────────────────────
+  // normalizeAttachments and nameFromEmail are module-level functions (not hooks),
+  // so they are stable and do NOT need to be in the dependency array.
   useEffect(() => {
     const unsubscribe = subscribe((incoming: IncomingMessage) => {
       if (!incoming.data) return;
 
-      // ── New message ──
+      // ── New message received ──
       if (incoming.type === "message:receive") {
         if (incoming.data.channelId !== channelId) return;
-        const serverMsg = incoming.data;
+        const s = incoming.data;
 
-        if (serverMsg.tempId) {
-          reconcileMessage(channelId, serverMsg.tempId, {
-            id: serverMsg.id ?? serverMsg.tempId,
-            content: serverMsg.content,
-            channelId: serverMsg.channelId,
-            userId: serverMsg.userId,
-            parentMessageId: serverMsg.parentMessageId ?? null,
-            // parentMessage snapshot comes from DB on page load; for optimistic messages
-            // we pass null here — the badge still shows from replyingTo state while composing
-            parentMessage: serverMsg.parentMessage ?? null,
-            name: channelName,
-            attachments: [],
-            createdAt: serverMsg.timestamp,
-            user: { id: serverMsg.userId, name: serverMsg.userEmail, email: serverMsg.userEmail },
-          });
+        const confirmedMessage: Message = {
+          id: s.id ?? s.tempId ?? `${Date.now()}-${Math.random()}`,
+          content: s.content,
+          channelId: s.channelId,
+          userId: s.userId,
+          parentMessageId: s.parentMessageId ?? null,
+          parentMessage: s.parentMessage ?? null,
+          name: channelName,
+          attachments: normalizeAttachments(s.attachments),
+          createdAt: s.timestamp,
+          user: {
+            id: s.userId,
+            name: nameFromEmail(s.userEmail),
+            email: s.userEmail,
+          },
+        };
+
+        if (s.tempId) {
+          // Sender's path: replace optimistic message with server-confirmed one
+          reconcileMessage(channelId, s.tempId, confirmedMessage);
         } else {
-          appendMessage(channelId, {
-            id: serverMsg.id ?? `${Date.now()}-${Math.random()}`,
-            content: serverMsg.content,
-            channelId: serverMsg.channelId,
-            userId: serverMsg.userId,
-            parentMessageId: serverMsg.parentMessageId ?? null,
-            parentMessage: serverMsg.parentMessage ?? null,
-            name: channelName,
-            attachments: [],
-            createdAt: serverMsg.timestamp,
-            user: { id: serverMsg.userId, name: serverMsg.userEmail, email: serverMsg.userEmail },
-          });
+          // Receiver's path: append as new message
+          appendMessage(channelId, confirmedMessage);
         }
 
         requestAnimationFrame(() => {
@@ -183,13 +234,13 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
         });
       }
 
-      // ✅ NEW: Edit confirmed by server — update for ALL users in the room
+      // ── Edit confirmed by server — update for ALL users in the room ──
       if (incoming.type === "message:edited") {
         if (incoming.data.channelId !== channelId) return;
         updateMessage(channelId, incoming.data.messageId as string, incoming.data.content);
       }
 
-      // ✅ NEW: Delete confirmed by server — remove for ALL users in the room
+      // ── Delete confirmed by server — remove for ALL users in the room ──
       if (incoming.type === "message:deleted") {
         if (incoming.data.channelId !== channelId) return;
         deleteMessage(channelId, incoming.data.messageId as string);
@@ -199,60 +250,97 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     return () => unsubscribe();
   }, [subscribe, channelId, channelName, appendMessage, reconcileMessage, updateMessage, deleteMessage]);
 
+  // ─── File upload ──────────────────────────────────────────────────────────
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset so the same file can be re-selected immediately after
+    e.target.value = "";
+
+    const token = sessionStorage.getItem("CollabAIToken");
+    if (!token) return;
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      // Do NOT manually set Content-Type — the browser must set it
+      // automatically so the multipart boundary is included correctly.
+      const res = await axios.post(`${API_BASE}/upload`, formData, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.data.success) {
+        setPendingAttachment(res.data.attachment as Attachment);
+      }
+    } catch (err) {
+      console.error("[ChatView] upload error:", err);
+    } finally {
+      setIsUploading(false);
+    }
+  }, []);
+
   // ─── Send (or reply) ──────────────────────────────────────────────────────
   const handleSend = useCallback(() => {
     const content = inputRef.current?.value.trim();
-    if (!content || !user) return;
+    // Allow send if there's text OR a pending attachment
+    if ((!content && !pendingAttachment) || !user) return;
 
     const tempId = `temp-${Date.now()}-${Math.random()}`;
     const createdAt = new Date().toISOString();
+    const messageContent = content ?? "";
 
+    // Optimistic append — shows instantly in sender's UI
     appendMessage(channelId, {
       id: tempId,
-      content,
+      content: messageContent,
       channelId,
       userId: user.id,
       parentMessageId: replyingTo?.id ?? null,
-      // Build parentMessage snapshot from replyingTo so badge shows instantly while optimistic
       parentMessage: replyingTo
         ? { id: replyingTo.id, content: replyingTo.content, userId: "", userName: replyingTo.userName }
         : null,
       name: channelName,
-      attachments: [],
+      attachments: pendingAttachment ? [pendingAttachment] : [],
       createdAt,
-      user: { id: user.id, name: user.email, email: user.email },
+      user: { id: user.id, name: nameFromEmail(user.email), email: user.email },
     });
 
+    // Clear input immediately so the UI feels instant
     if (inputRef.current) inputRef.current.value = "";
     setReplyingTo(null);
+    setPendingAttachment(null);
 
     requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     });
 
+    // Send to server over WebSocket
     sendMessage({
       type: "message:send",
       data: {
         channelId,
         channelName,
         userId: user.id,
-        content,
+        content: messageContent,
         tempId,
         createdAt,
         parentMessageId: replyingTo?.id ?? null,
+        attachments: pendingAttachment ? [pendingAttachment] : [],
       },
     });
-  }, [user, channelId, channelName, sendMessage, appendMessage, replyingTo]);
+  }, [user, channelId, channelName, sendMessage, appendMessage, replyingTo, pendingAttachment]);
 
-  // ✅ NEW: Edit submit — optimistic update + send to server
+  // ─── Edit submit — optimistic update + broadcast to server ───────────────
   const handleEditSubmit = useCallback(() => {
     const newContent = editInputRef.current?.value.trim();
     if (!newContent || !editingMessage || !user) return;
 
-    // Optimistically update the store immediately so the UI feels instant
+    // Optimistically update in store so UI reflects instantly
     updateMessage(channelId, editingMessage.id, newContent);
 
-    // Send to server — backend calls editMessage() service and broadcasts message:edited
     sendMessage({
       type: "message:edit",
       data: {
@@ -265,18 +353,14 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     setEditingMessage(null);
   }, [editingMessage, user, channelId, sendMessage, updateMessage]);
 
-  // ✅ NEW: Delete — optimistic remove + send to server
+  // ─── Delete — optimistic remove + broadcast to server ────────────────────
   const handleDelete = useCallback((messageId: string) => {
-    // Optimistically remove from store immediately so the UI feels instant
+    // Optimistically remove so UI reflects instantly
     deleteMessage(channelId, messageId);
 
-    // Send to server — backend calls deleteMessage() service and broadcasts message:deleted
     sendMessage({
       type: "message:delete",
-      data: {
-        messageId,
-        channelId,
-      },
+      data: { messageId, channelId },
     } as any);
   }, [channelId, sendMessage, deleteMessage]);
 
@@ -333,14 +417,14 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
           <div className="text-center text-sm text-red-400 py-2">{error}</div>
         )}
 
-        {messages.length === 0 && (
+        {messages.length === 0 && !isLoading && (
           <div className="flex items-center justify-center h-full">
             <p className="text-gray-500 text-sm">No messages yet. Say hello! 👋</p>
           </div>
         )}
 
         {/* ── Message list ── */}
-        {messages.map((msg, index) => {
+        {messages.map((msg: Message, index: number) => {
           const isCurrentUser = msg.userId === user?.id;
           const avatarGradient = getAvatarGradient(msg.userId);
           const displayName = isCurrentUser ? "You" : msg.user.name;
@@ -368,7 +452,7 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                   <span className="text-xs text-gray-400">{formatTime(msg.createdAt)}</span>
                 </div>
 
-                {/* Reply context badge — uses parentMessage snapshot from DB, always accurate */}
+                {/* Reply context badge */}
                 {msg.parentMessageId && msg.parentMessage && (
                   <div className="flex items-center gap-1.5 text-xs mb-1 bg-slate-800/60 border-l-2 border-purple-500/50 rounded px-2 py-1 max-w-sm">
                     <Reply className="w-3 h-3 shrink-0 text-purple-400" />
@@ -386,7 +470,7 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                   <div className="mt-1 flex items-center gap-2">
                     <input
                       ref={editInputRef}
-                      defaultValue={editingMessage.content}
+                      defaultValue={editingMessage?.content ?? ""}
                       onKeyDown={handleEditKeyDown}
                       className="flex-1 bg-slate-800 border border-purple-500 rounded-lg px-3 py-1.5 text-sm text-white outline-none"
                     />
@@ -404,7 +488,31 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                     </button>
                   </div>
                 ) : (
-                  <p className="mt-1 text-gray-300">{msg.content}</p>
+                  <>
+                    {msg.content && (
+                      <p className="mt-1 text-gray-300 wrap-break-word">{msg.content}</p>
+                    )}
+                    {/* ── Attachment pills ── */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {msg.attachments.map((att: Attachment) => (
+                          <a
+                            key={att.id ?? att.url}
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={att.name}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-purple-500/60 hover:bg-slate-700 transition-colors max-w-xs"
+                          >
+                            <FileText className="w-4 h-4 shrink-0 text-purple-400" />
+                            <span className="text-xs text-gray-400 truncate max-w-40">
+                              {att.name}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -485,9 +593,17 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
       {/* ── Message Input ── */}
       <div className="p-4 border-t border-slate-800">
 
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+
         {/* Reply banner */}
         {replyingTo && (
-          <div className="flex items-center justify-between px-3 py-2 mb-2 bg-slate-800 
+          <div className="flex items-center justify-between px-3 py-2 mb-2 bg-slate-800
                           border-l-2 border-purple-500 rounded-lg text-sm">
             <div className="flex items-center gap-2 text-gray-400 min-w-0">
               <Reply className="w-3.5 h-3.5 shrink-0 text-purple-400" />
@@ -505,6 +621,20 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
           </div>
         )}
 
+        {/* Pending attachment preview */}
+        {pendingAttachment && (
+          <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-slate-800 border border-slate-700 rounded-lg">
+            <FileText className="w-4 h-4 shrink-0 text-purple-400" />
+            <span className="text-sm text-gray-300 truncate flex-1">{pendingAttachment.name}</span>
+            <button
+              onClick={() => setPendingAttachment(null)}
+              className="text-gray-500 hover:text-white shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <div className="bg-slate-900 rounded-xl border border-slate-700 focus-within:border-purple-500 focus-within:ring-2 focus-within:ring-purple-500/20 transition-all">
           <div className="flex items-center gap-2 px-4 py-3">
             <input
@@ -517,8 +647,17 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
           </div>
           <div className="flex items-center justify-between px-4 py-2 border-t border-slate-800">
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-slate-800">
-                <Paperclip className="w-4 h-4" />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className={`hover:text-white hover:bg-slate-800 ${pendingAttachment ? "text-purple-400" : "text-gray-400"}`}
+              >
+                {isUploading
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Paperclip className="w-4 h-4" />
+                }
               </Button>
               <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-slate-800">
                 <AtSign className="w-4 h-4" />

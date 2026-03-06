@@ -107,10 +107,15 @@ function isLeaveChannel(m: any): m is LeaveChannelMessage {
 }
 
 function isSendMessage(m: any): m is SendMessagePayload {
+  const hasContent =
+    typeof m.data?.content === "string" && m.data.content.trim().length > 0;
+  const hasAttachments =
+    Array.isArray(m.data?.attachments) && m.data.attachments.length > 0;
+
   return (
     m?.type === "message:send" &&
-    typeof m.data?.content === "string" &&
-    m.data.content.trim().length > 0 &&
+    typeof m.data?.content === "string" &&   // content field must exist (can be empty string)
+    (hasContent || hasAttachments) &&          // but must have text OR at least one attachment
     typeof m.data?.channelId === "string" &&
     typeof m.data?.channelName === "string"
   );
@@ -567,7 +572,7 @@ async function handleSendMessage(
         });
 
     console.log(
-      `💬 ${meta.userEmail} → room ${meta.currentRoom}: "${data.content.slice(0, 60)}"`,
+      `💬 ${meta.userEmail} → room ${meta.currentRoom}: "${data.content ? data.content.slice(0, 60) : `[${(data.attachments ?? []).length} attachment(s)]`}"`,
     );
 
     // If this is a reply, fetch the parent snapshot so the reply badge
@@ -590,6 +595,7 @@ async function handleSendMessage(
         content: data.content,
         parentMessageId: data.parentMessageId ?? null,
         parentMessage, // ✅ real DB snapshot — never null for replies
+        attachments: data.attachments ?? [],  // ✅ FIX: include attachments so receivers can see files
         timestamp: savedMessage?.createdAt ?? new Date().toISOString(),
       },
     });
