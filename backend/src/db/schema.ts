@@ -153,3 +153,70 @@ export const invitesTable = pgTable("invites", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// 8. Document table
+
+export const documentsTable = pgTable("documents", {
+  id: uuid("id")
+    .default(sql`gen_random_uuid()`)
+    .primaryKey(),
+
+  workspaceId: uuid("workspace_id")
+    .notNull()
+    .references(() => wrokspaceTable.id, { onDelete: "cascade" }),
+
+  channelId: uuid("channel_id")
+    .notNull()
+    .references(() => Channels.id, { onDelete: "cascade" }),
+
+  title: varchar("title", { length: 255 }).notNull().default("Untitled"),
+
+  // { blocks: [{ type: "paragraph"|"heading"|"list", text: string }] }
+  content: jsonb("content")
+    .notNull()
+    .default({ blocks: [] }),
+
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Document Comments
+// ─────────────────────────────────────────────────────────────────────────────
+export const documentCommentsTable = pgTable("comments", {
+  id: uuid("id")
+    .default(sql`gen_random_uuid()`)
+    .primaryKey(),
+
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documentsTable.id, { onDelete: "cascade" }),
+
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+
+  text: text("text").notNull(),
+
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inferred TypeScript types
+// ─────────────────────────────────────────────────────────────────────────────
+export type Document           = typeof documentsTable.$inferSelect;
+export type NewDocument        = typeof documentsTable.$inferInsert;
+export type DocumentComment    = typeof documentCommentsTable.$inferSelect;
+export type NewDocumentComment = typeof documentCommentsTable.$inferInsert;
+
