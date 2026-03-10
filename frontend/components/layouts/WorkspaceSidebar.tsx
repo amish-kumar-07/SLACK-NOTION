@@ -9,6 +9,9 @@ import { useInvite } from "@/app/hooks/useInvites";
 import { useToast } from "@/app/context/ToastContext";
 import { useAuth } from "@/app/context/AuthContext";
 import { useWebSocket, IncomingMessage } from "@/app/context/WebSocketProvider";
+import { useDocuments } from "@/app/hooks/useDocuments";
+import { useDocumentStore, Document } from "@/app/store/useDocumentStore";
+import { CreateDocumentDrawer } from "@/components/features/DocumentsLanding";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +21,7 @@ interface WorkspaceSidebarProps {
   workspaceName: string;
   workspaceId: string;
   channelId: string;
+  activeDocumentId?: string | null;
 }
 
 interface ActiveUser {
@@ -58,12 +62,29 @@ export const WorkspaceSidebar = ({
   workspaceName,
   workspaceId,
   channelId,
+  activeDocumentId,
 }: WorkspaceSidebarProps) => {
+  const router = useRouter();
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { invite } = useInvite();
   const toast = useToast();
   const { user } = useAuth();
   const { subscribe, requestPresence } = useWebSocket();
+
+  // ── Documents ─────────────────────────────────────────────────────────────
+  const { documents } = useDocuments(workspaceId, channelId);
+  const prependDocument = useDocumentStore((s) => s.prependDocument);
+
+  const handleDocumentCreated = (doc: Document) => {
+    prependDocument(doc);
+    setDrawerOpen(false);
+    router.push(`/pages/w/${workspaceId}/c/${channelId}/d/${doc.id}`);
+  };
+
+  const handleSelectDoc = (docId: string) => {
+    router.push(`/pages/w/${workspaceId}/c/${channelId}/d/${docId}`);
+  };
 
   // ── Active users presence state ───────────────────────────────────────────
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
@@ -121,8 +142,6 @@ export const WorkspaceSidebar = ({
 
   const channels = [
     { id: "general", name: "general", unread: 3 },
-    { id: "design", name: "design", unread: 0 },
-    { id: "engineering", name: "engineering", unread: 1 },
   ];
 
   const handleInvite = async (name: string, email: string, role: "admin" | "member") => {
@@ -214,9 +233,6 @@ export const WorkspaceSidebar = ({
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                 Channels
               </p>
-              <button className="text-gray-400 hover:text-white transition-colors">
-                <Plus className="w-4 h-4" />
-              </button>
             </div>
             <div className="space-y-0.5">
               {channels.map((channel) => (
@@ -285,40 +301,45 @@ export const WorkspaceSidebar = ({
         </div>
       )}
 
-        {/* Documents List (documents mode) — unchanged */}
+        {/* Documents List (documents mode) */}
         {activeMode === "documents" && (
           <div className="p-3 flex-1 overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between px-3 py-2">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Recent Documents
+                Documents
               </p>
-              <button className="text-gray-400 hover:text-white transition-colors">
+              <button
+                className="text-gray-400 hover:text-white transition-colors"
+                onClick={() => setDrawerOpen(true)}
+              >
                 <Plus className="w-4 h-4" />
               </button>
             </div>
             <div className="space-y-0.5">
-              <button className="flex items-center gap-2 px-3 py-1.5 rounded text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
-                <FileText className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="flex-1 truncate">Project Roadmap 2024</span>
-              </button>
-              <button className="flex items-center gap-2 px-3 py-1.5 rounded text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
-                <FileText className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="flex-1 truncate">Meeting Notes</span>
-              </button>
-              <button className="flex items-center gap-2 px-3 py-1.5 rounded text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
-                <FileText className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="flex-1 truncate">Design Specs</span>
-              </button>
+              {documents.length === 0 && (
+                <p className="text-xs text-gray-500 px-3 py-2">No documents yet</p>
+              )}
+              {documents.map((doc) => (
+                <button
+                  key={doc.id}
+                  onClick={() => handleSelectDoc(doc.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded transition-colors w-full text-left",
+                    activeDocumentId === doc.id
+                      ? "bg-blue-500/20 text-blue-300"
+                      : "text-gray-400 hover:bg-slate-800 hover:text-white"
+                  )}
+                >
+                  <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span className="flex-1 truncate text-sm">{doc.title}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
 
         {/* Bottom Section — unchanged */}
         <div className="p-3 border-t border-slate-800">
-          <button className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
-            <Users className="w-5 h-5" />
-            <span className="font-medium">Team Members</span>
-          </button>
           <button className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
             <Settings className="w-5 h-5" />
             <span className="font-medium">Settings</span>
@@ -331,6 +352,14 @@ export const WorkspaceSidebar = ({
         onClose={() => setIsInviteDialogOpen(false)}
         onInvite={handleInvite}
         roomName={workspaceName}
+      />
+
+      <CreateDocumentDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        workspaceId={workspaceId}
+        channelId={channelId}
+        onCreated={handleDocumentCreated}
       />
     </>
   );

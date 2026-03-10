@@ -10,6 +10,7 @@ import {
   updateDocument,
   getComments,
   createComment,
+  deleteDocument
 } from "../../services/docService/index.js";
 
 const doc = Router();
@@ -145,6 +146,25 @@ doc.post(
         return res.status(500).json({ message: "Failed to post comment" });
       }
       return res.status(200).json({ success: true, data: comment });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal Server!" });
+    }
+  }
+);
+
+// DELETE /doc/:docId
+doc.delete(
+  "/:docId",
+  authMiddleware,
+  async (req: Request<{ docId: string }>, res) => {
+    try {
+      const { docId } = req.params;
+      const deleted = await deleteDocument(docId);
+      if (!deleted) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      return res.status(200).json({ success: true });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ message: "Internal Server!" });
