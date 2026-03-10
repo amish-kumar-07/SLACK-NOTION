@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Comment {
@@ -177,7 +179,7 @@ export const DocumentsView = () => {
       setDocLoading(true);
       setDocError(null);
       try {
-        const res = await fetch(`http://localhost:4000/doc/${docId}`, {
+        const res = await fetch(BASE_URL+`/doc/${docId}`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (!res.ok) throw new Error("Failed to load document");
@@ -211,7 +213,7 @@ export const DocumentsView = () => {
     const fetchComments = async () => {
       setCommentsLoading(true);
       try {
-        const res = await fetch(`http://localhost:4000/doc/comments/${docId}`, {
+        const res = await fetch(BASE_URL+`/doc/comments/${docId}`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (!res.ok) throw new Error();
@@ -233,7 +235,7 @@ export const DocumentsView = () => {
     setSaveStatus("saving");
     try {
       const content = editor.getJSON();
-      const res = await fetch(`http://localhost:4000/doc/${docId}`, {
+      const res = await fetch(BASE_URL+`/doc/${docId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -258,7 +260,7 @@ export const DocumentsView = () => {
     if (!commentText.trim() || !docId) return;
     setPostingComment(true);
     try {
-      const res = await fetch(`http://localhost:4000/doc/comments/${docId}`, {
+      const res = await fetch(BASE_URL+`/doc/comments/${docId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -287,7 +289,7 @@ export const DocumentsView = () => {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("http://localhost:4000/upload", {
+      const res = await fetch(BASE_URL+"/upload", {
         method: "POST",
         headers: { Authorization: `Bearer ${getToken()}` },
         body: formData,

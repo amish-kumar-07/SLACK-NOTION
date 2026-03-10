@@ -42,8 +42,6 @@ export const WorkspaceSidebar = ({
 
   const channels = [
     { id: "general", name: "general", unread: 3 },
-    { id: "design", name: "design", unread: 0 },
-    { id: "engineering", name: "engineering", unread: 1 },
   ];
 
   const handleDocumentCreated = (doc: Document) => {
@@ -119,7 +117,6 @@ export const WorkspaceSidebar = ({
           <div className="p-3 flex-1 overflow-y-auto animate-fade-in">
             <div className="flex items-center justify-between px-3 py-2">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Channels</p>
-              <button className="text-gray-400 hover:text-white transition-colors"><Plus className="w-4 h-4" /></button>
             </div>
             <div className="space-y-0.5">
               {channels.map((channel) => (

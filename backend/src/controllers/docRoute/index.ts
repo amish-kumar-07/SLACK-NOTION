@@ -65,7 +65,6 @@ doc.get(
 // GET /doc/:docId — fetch single document by ID
 doc.get(
   "/:docId",
-  authMiddleware,
   async (req: Request<{ docId: string }>, res) => {
     try {
       const { docId } = req.params;

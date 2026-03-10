@@ -2,6 +2,8 @@
 import { useEffect, useRef } from "react";
 import { useDocumentStore } from "@/app/store/useDocumentStore";
 
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
 export const useDocuments = (workspaceId: string, channelId: string) => {
   const { setDocuments, setLoading, setError, documents, isLoading, error } =
     useDocumentStore();
@@ -19,7 +21,7 @@ export const useDocuments = (workspaceId: string, channelId: string) => {
       try {
         const token = sessionStorage.getItem("CollabAIToken");
         const res = await fetch(
-          `http://localhost:4000/doc/getDoc/${workspaceId}/${channelId}`,
+           BASE_URL+`/doc/getDoc/${workspaceId}/${channelId}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }

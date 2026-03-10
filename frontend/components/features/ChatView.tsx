@@ -10,6 +10,8 @@ import { useWebSocket, IncomingMessage, SendMessagePayload } from "@/app/context
 import { useAuth } from "@/app/context/AuthContext";
 import { useMessages } from "@/app/hooks/useMessages";
 import { useMessageStore, Attachment, Message } from "@/app/store/useMessageStore";
+import { useDocumentStore } from "@/app/store/useDocumentStore";
+import { useDocuments } from "@/app/hooks/useDocuments";
 import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -89,6 +91,109 @@ function normalizeAttachments(raw: unknown[] | undefined): Attachment[] {
 }
 
 // ========================================
+// DOC LINK — encoding / decoding
+// Messages that share a doc are plain text with this prefix so they
+// round-trip cleanly through the existing WebSocket + message store
+// without any schema changes.
+// Format: %%DOC_LINK%%{"title":"...","url":"..."}
+// ========================================
+const DOC_LINK_PREFIX = "%%DOC_LINK%%";
+
+function encodeDocLink(title: string, url: string): string {
+  return `${DOC_LINK_PREFIX}${JSON.stringify({ title, url })}`;
+}
+
+function parseDocLink(content: string): { title: string; url: string } | null {
+  if (!content.startsWith(DOC_LINK_PREFIX)) return null;
+  try {
+    return JSON.parse(content.slice(DOC_LINK_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+
+// ── Doc link rich card (shown instead of plain text) ─────────────────────────
+function DocLinkCard({ title, url }: { title: string; url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-800/80 border border-slate-700 hover:border-purple-500/60 hover:bg-slate-800 transition-all max-w-sm group/card"
+    >
+      <div className="w-9 h-9 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0 group-hover/card:bg-purple-500/30 transition-colors">
+        <FileText className="w-4 h-4 text-purple-400" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-white truncate">{title || "Untitled"}</p>
+        <p className="text-xs text-gray-500 mt-0.5">Click to open document</p>
+      </div>
+    </a>
+  );
+}
+
+// ── Doc picker modal ──────────────────────────────────────────────────────────
+function DocPickerModal({
+  documents,
+  search,
+  onSearch,
+  onSelect,
+  onClose,
+}: {
+  documents: { id: string; title: string }[];
+  search: string;
+  onSearch: (v: string) => void;
+  onSelect: (doc: { id: string; title: string }) => void;
+  onClose: () => void;
+}) {
+  const filtered = documents.filter((d) =>
+    (d.title || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-700">
+        <span className="text-sm font-semibold text-white">Share a Document</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors p-0.5 rounded">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      {/* Search */}
+      <div className="px-3 py-2 border-b border-slate-700">
+        <input
+          autoFocus
+          type="text"
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search documents..."
+          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-gray-500 outline-none focus:ring-1 focus:ring-purple-500"
+        />
+      </div>
+      {/* List */}
+      <div className="max-h-52 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <div className="py-8 text-center text-sm text-gray-500">No documents found</div>
+        ) : (
+          filtered.map((doc) => (
+            <button
+              key={doc.id}
+              onClick={() => onSelect(doc)}
+              className="flex items-center gap-3 w-full px-3 py-2.5 text-left hover:bg-slate-700 transition-colors"
+            >
+              <div className="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center shrink-0">
+                <FileText className="w-3.5 h-3.5 text-purple-400" />
+              </div>
+              <span className="text-sm text-gray-200 truncate">{doc.title || "Untitled"}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ========================================
 // COMPONENT
 // ========================================
 export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps) => {
@@ -98,6 +203,12 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
   const { appendMessage, reconcileMessage, updateMessage, deleteMessage } = useMessageStore();
   const { sendMessage, subscribe } = useWebSocket();
   const { user } = useAuth();
+
+  // ── Documents (reuse existing hook + store — no extra fetch if already loaded) ──
+  const { documents } = useDocuments(workspaceId, channelId);
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [docSearch, setDocSearch] = useState("");
+  const docPickerRef = useRef<HTMLDivElement>(null);
 
   // ── Menu state ──
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -144,6 +255,8 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     setReplyingTo(null);
     setEditingMessage(null);
     setPendingAttachment(null);
+    setShowDocPicker(false);
+    setDocSearch("");
   }, [channelId]);
 
   // ─── Close menu on outside click ─────────────────────────────────────────
@@ -151,6 +264,9 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setActiveMenu(null);
+      }
+      if (docPickerRef.current && !docPickerRef.current.contains(e.target as Node)) {
+        setShowDocPicker(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -364,6 +480,53 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
     } as any);
   }, [channelId, sendMessage, deleteMessage]);
 
+  // ─── Share doc — sends a special encoded message that renders as a card ──
+  const handleDocSelect = useCallback((doc: { id: string; title: string }) => {
+    if (!user) return;
+
+    const APP_BASE = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const docUrl = `${APP_BASE}/pages/w/${workspaceId}/c/${channelId}/d/${doc.id}`;
+    const content = encodeDocLink(doc.title, docUrl);
+
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const createdAt = new Date().toISOString();
+
+    // Optimistic append
+    appendMessage(channelId, {
+      id: tempId,
+      content,
+      channelId,
+      userId: user.id,
+      parentMessageId: null,
+      parentMessage: null,
+      name: channelName,
+      attachments: [],
+      createdAt,
+      user: { id: user.id, name: nameFromEmail(user.email), email: user.email },
+    });
+
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
+
+    sendMessage({
+      type: "message:send",
+      data: {
+        channelId,
+        channelName,
+        userId: user.id,
+        content,
+        tempId,
+        createdAt,
+        parentMessageId: null,
+        attachments: [],
+      },
+    });
+
+    setShowDocPicker(false);
+    setDocSearch("");
+  }, [user, workspaceId, channelId, channelName, sendMessage, appendMessage]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -489,9 +652,12 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                   </div>
                 ) : (
                   <>
-                    {msg.content && (
-                      <p className="mt-1 text-gray-300 wrap-break-word">{msg.content}</p>
-                    )}
+                    {msg.content && (() => {
+                      const docLink = parseDocLink(msg.content);
+                      return docLink
+                        ? <DocLinkCard title={docLink.title} url={docLink.url} />
+                        : <p className="mt-1 text-gray-300 wrap-break-word">{msg.content}</p>;
+                    })()}
                     {/* ── Attachment pills ── */}
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -666,9 +832,25 @@ export const ChatView = ({ workspaceId, channelId, channelName }: ChatViewProps)
                 <Smile className="w-4 h-4" />
               </Button>
               <div className="w-px h-4 bg-slate-700 mx-1" />
-              <Button variant="ghost" size="icon" className="text-blue-400 hover:bg-blue-500/10">
-                <FileText className="w-4 h-4" />
-              </Button>
+              <div className="relative" ref={docPickerRef}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => { setShowDocPicker((v) => !v); setDocSearch(""); }}
+                  className={`hover:bg-blue-500/10 ${showDocPicker ? "text-blue-400 bg-blue-500/10" : "text-blue-400"}`}
+                >
+                  <FileText className="w-4 h-4" />
+                </Button>
+                {showDocPicker && (
+                  <DocPickerModal
+                    documents={documents}
+                    search={docSearch}
+                    onSearch={setDocSearch}
+                    onSelect={handleDocSelect}
+                    onClose={() => setShowDocPicker(false)}
+                  />
+                )}
+              </div>
               <Button variant="ghost" size="icon" className="text-green-400 hover:bg-green-500/10">
                 <PenTool className="w-4 h-4" />
               </Button>
