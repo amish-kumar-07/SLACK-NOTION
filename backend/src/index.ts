@@ -6,6 +6,7 @@ import channel from "./controllers/channel/index.js";
 import invite from "./controllers/invite/index.js";
 import mssg from "./controllers/message/index.js";
 import uploadRoute from "./controllers/upload/index.js";
+import doc from "./controllers/docRoute/index.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import { setupWebSocket } from "./controllers/ws/channel/index.js";  // ← Import WebSocket setup
 import cors from "cors";
@@ -30,6 +31,7 @@ app.use("/channel", channel);
 app.use("/invite",invite);
 app.use("/message",mssg);
 app.use("/",uploadRoute);
+app.use("/doc",doc);
 
 // Health check
 app.get('/health', (req, res) => {

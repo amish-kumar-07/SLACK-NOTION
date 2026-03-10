@@ -36,3 +36,9 @@ export const AcceptInvite = z.object({
     workspaceId : z.string(),
     role : z.enum(["admin","member"]).default("member")
 });
+
+export const DocCreateSchema = z.object({
+  workspaceId: z.string().uuid(),
+  channelId: z.string().uuid(),
+  title: z.string().min(6).nullable()
+});
