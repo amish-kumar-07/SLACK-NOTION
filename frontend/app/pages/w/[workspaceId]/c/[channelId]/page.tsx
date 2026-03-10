@@ -1,76 +1,70 @@
-// app/workspace/[id]/page.tsx
+// app/pages/w/[workspaceId]/c/[channelId]/page.tsx
 "use client";
-import { useEffect, useState , useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { WorkspaceSidebar } from "@/components/layouts/WorkspaceSidebar";
 import { WorkspaceHeader } from "@/components/layouts/WorkspaceHeader";
 import { ChatView } from "@/components/features/ChatView";
-import { DocumentsView } from "@/components/features/DocumentsView";
-import { useRouter } from "next/navigation";
+import { DocumentsLanding } from "@/components/features/DocumentsLanding";
 import { useWebSocket } from "@/app/context/WebSocketProvider";
 
 type WorkspaceMode = "chat" | "documents";
 
 const modeNames = {
   chat: "general",
-  documents: "Project Roadmap 2024",
-  whiteboard: "System Architecture",
+  documents: "Documents",
 };
-
 
 export default function WorkspacePage() {
   const params = useParams();
+
   const workspaceId = params.workspaceId?.toString();
   const channelId = params.channelId?.toString();
   const router = useRouter();
   const didConnect = useRef(false);
 
   const { connect, disconnect, joinChannel, leaveChannel, isConnected } = useWebSocket();
+
   if (!workspaceId || !channelId) {
     router.push("/pages/dashboard");
     return null;
   }
 
-  console.log('Workspace:', workspaceId, 'Channel:', channelId);
   const [activeMode, setActiveMode] = useState<WorkspaceMode>("chat");
 
-  // Connect WebSocket when component mounts
   useEffect(() => {
     if (didConnect.current) return;
-    console.log("🚀 Workspace page mounted, connecting WebSocket...");
     connect();
     didConnect.current = true;
+    return () => { disconnect(); };
+  }, []);
 
-    return () => {
-      console.log("🔌 Workspace page unmounting, disconnecting...");
-      disconnect();
-    };
-  }, []); // Only on mount/unmount
-
-  // Join channel when WebSocket is connected
   useEffect(() => {
-    if (!isConnected) {
-      console.log("⏳ Waiting for WebSocket connection...");
-      return;
-    }
-
-    console.log("✅ WebSocket connected, joining channel...");
+    if (!isConnected) return;
     joinChannel(workspaceId, channelId);
-
     return () => {
-      if (isConnected) {
-        console.log("👋 Leaving channel...");
-        leaveChannel(workspaceId, channelId);
-      }
+      if (isConnected) leaveChannel(workspaceId, channelId);
     };
-  }, [workspaceId, channelId, isConnected]); // ← Missing joinChannel, leaveChannel
+  }, [workspaceId, channelId, isConnected]);
 
   const renderContent = () => {
     switch (activeMode) {
       case "chat":
-        return (<ChatView workspaceId={workspaceId} channelId={channelId} channelName= {modeNames.chat}/>);
+        return (
+          <ChatView
+            workspaceId={workspaceId}
+            channelId={channelId}
+            channelName={modeNames.chat}
+          />
+        );
       case "documents":
-        return <DocumentsView />;
+        return (
+          <DocumentsLanding
+            workspaceId={workspaceId}
+            channelId={channelId}
+          />
+        );
       default:
         return null;
     }
