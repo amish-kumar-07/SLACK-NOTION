@@ -355,6 +355,38 @@ export function setupWebSocket(server: Server) {
           break;
         }
 
+        // ── GET_PRESENCE: client requests current room members ──
+        case "GET_PRESENCE": {
+          try {
+            const meta = await getSocketMetadata(socketId);
+            if (!meta || !meta.currentRoom) break;
+
+            const roomSocketIds = await getRoomSockets(meta.currentRoom);
+            const seen = new Set<string>();
+            const presenceList: { userId: string; userEmail: string }[] = [];
+
+            for (const sid of roomSocketIds) {
+              const m = await getSocketMetadata(sid);
+              if (m && !seen.has(m.userId)) {
+                seen.add(m.userId);
+                presenceList.push({ userId: m.userId, userEmail: m.userEmail });
+              }
+            }
+
+            // currentRoom format is "workspaceId:channelId"
+            const channelId = meta.currentRoom.split(":")[1] ?? "";
+
+            safeSend(ws, {
+              type: "ROOM_PRESENCE",
+              channelId,
+              users: presenceList,
+            });
+          } catch (err) {
+            console.warn("⚠️ GET_PRESENCE failed:", err);
+          }
+          break;
+        }
+
         // ----------------------------------
         default:
           console.log(
@@ -454,6 +486,29 @@ async function handleJoinChannel(
       userEmail: meta.userEmail,
       timestamp: new Date().toISOString(),
     });
+
+    // ── NEW: Send presence snapshot to the joining socket only ──
+    // Collect metadata for all sockets currently in the room so the
+    // joiner immediately knows who's already active — without waiting
+    // for future USER_JOINED events.
+    try {
+      const roomSocketIds = await getRoomSockets(roomId);
+      const presenceList: { userId: string; userEmail: string }[] = [];
+
+      for (const sid of roomSocketIds) {
+        const m = await getSocketMetadata(sid);
+        if (m) presenceList.push({ userId: m.userId, userEmail: m.userEmail });
+      }
+
+      safeSend(ws, {
+        type: "ROOM_PRESENCE",
+        channelId,
+        users: presenceList,
+      });
+    } catch (presenceErr) {
+      // Non-critical — sidebar will still fill in via USER_JOINED events
+      console.warn("⚠️ Failed to send ROOM_PRESENCE snapshot:", presenceErr);
+    }
 
     console.log(`✅ ${meta.userEmail} successfully joined room ${roomId}`);
   } catch (error) {
