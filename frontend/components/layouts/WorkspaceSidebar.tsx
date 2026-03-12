@@ -1,8 +1,8 @@
 // components/layouts/WorkspaceSidebar.tsx
 'use client';
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, FileText, PenTool, Settings, Plus, ChevronDown, Hash, Users } from "lucide-react";
+import { MessageSquare, FileText, Layers, Settings, Plus, ChevronDown, Hash, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { InviteBox } from "../customComponent/Invitepopup";
 import { useInvite } from "@/app/hooks/useInvites";
@@ -174,14 +174,16 @@ export const WorkspaceSidebar = ({
 
         {/* Workspace Header */}
         <div className="p-4 border-b border-slate-800">
-          <button className="flex items-center gap-2 w-full hover:bg-slate-800 rounded-lg p-2 -m-2 transition-colors">
+          <button
+           onClick={() => router.push(`${process.env.NEXT_PUBLIC_APP_URL}/pages/dashboard`)}
+            className="flex items-center gap-2 w-full hover:bg-slate-800 rounded-lg p-2 -m-2 transition-colors"
+          >
             <div className="w-8 h-8 rounded-lg bg-linear-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-semibold text-sm">
-              {workspaceName.charAt(0).toUpperCase()}
+              <Layers className="w-4 h-4 text-white" />
             </div>
             <span className="font-semibold text-white flex-1 text-left truncate">
-              {workspaceName}
+              {"CollabAI"}
             </span>
-            <ChevronDown className="w-4 h-4 text-gray-400" />
           </button>
         </div>
 

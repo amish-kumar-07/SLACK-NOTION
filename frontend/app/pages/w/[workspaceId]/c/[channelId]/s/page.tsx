@@ -31,9 +31,9 @@ function formatDate(iso?: string) {
 // ─── Plan Config ─────────────────────────────────────────────────────────────
 
 const planConfig = {
-  free:       { label: "Free",       color: "text-slate-400",  bg: "rgba(255,255,255,0.04)",  border: "rgba(255,255,255,0.08)",  dot: "#64748b" },
-  pro:        { label: "Pro",        color: "text-violet-300", bg: "rgba(139,92,246,0.08)",   border: "rgba(139,92,246,0.2)",    dot: "#8b5cf6" },
-  enterprise: { label: "Enterprise", color: "text-amber-300",  bg: "rgba(245,158,11,0.08)",   border: "rgba(245,158,11,0.2)",    dot: "#f59e0b" },
+  free: { label: "Free", color: "text-slate-400", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)", dot: "#64748b" },
+  pro: { label: "Pro", color: "text-violet-300", bg: "rgba(139,92,246,0.08)", border: "rgba(139,92,246,0.2)", dot: "#8b5cf6" },
+  enterprise: { label: "Enterprise", color: "text-amber-300", bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.2)", dot: "#f59e0b" },
 };
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ function InfoRow({
   iconColor?: string;
 }) {
   return (
-    <div className="flex items-center justify-between px-5 py-4 transition-colors hover:bg-white/[0.02]">
+    <div className="flex items-center justify-between px-5 py-4 transition-colors hover:bg-white/2">
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
           <span className={iconColor}>{icon}</span>
@@ -285,7 +285,7 @@ export default function WorkspaceSettingsPage() {
         {/* Ambient glow */}
         <div className="fixed inset-0 pointer-events-none" aria-hidden>
           <div
-            className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] blur-[120px] opacity-20"
+            className="absolute top-0 left-1/2 -translate-x-1/2 w-150 h-75 blur-[120px] opacity-20"
             style={{ background: "radial-gradient(ellipse, #6d28d9 0%, transparent 70%)" }}
           />
         </div>
@@ -342,7 +342,7 @@ export default function WorkspaceSettingsPage() {
               <div className="mb-4">
                 <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-widest px-1 mb-3">General</p>
                 <div className="rounded-2xl overflow-hidden" style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.015) 100%)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                  <div className="divide-y divide-white/[0.04]">
+                  <div className="divide-y divide-white/4">
                     <InfoRow icon={<Globe className="w-4 h-4" />} label="Workspace Name" value={workspaceName} />
                     <InfoRow
                       icon={<Fingerprint className="w-4 h-4" />}
