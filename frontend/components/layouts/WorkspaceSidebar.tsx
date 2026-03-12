@@ -298,8 +298,8 @@ export const WorkspaceSidebar = ({
                 })
               )}
             </div>
-        </div>
-      )}
+          </div>
+        )}
 
         {/* Documents List (documents mode) */}
         {activeMode === "documents" && (
@@ -340,7 +340,10 @@ export const WorkspaceSidebar = ({
 
         {/* Bottom Section — unchanged */}
         <div className="p-3 border-t border-slate-800">
-          <button className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left">
+          <button
+            onClick={() => router.push(`/pages/w/${workspaceId}/c/${channelId}/s`)}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-400 hover:bg-slate-800 hover:text-white transition-colors w-full text-left"
+          >
             <Settings className="w-5 h-5" />
             <span className="font-medium">Settings</span>
           </button>

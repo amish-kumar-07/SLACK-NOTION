@@ -10,7 +10,6 @@ import { useWebSocket, IncomingMessage, SendMessagePayload } from "@/app/context
 import { useAuth } from "@/app/context/AuthContext";
 import { useMessages } from "@/app/hooks/useMessages";
 import { useMessageStore, Attachment, Message } from "@/app/store/useMessageStore";
-import { useDocumentStore } from "@/app/store/useDocumentStore";
 import { useDocuments } from "@/app/hooks/useDocuments";
 import axios from "axios";
 
