@@ -1,5 +1,5 @@
 import { db } from "../../db/index.js";
-import { wrokspaceTable , WorkspaceMembers } from "../../db/schema.js";
+import { wrokspaceTable , WorkspaceMembers  , usersTable} from "../../db/schema.js";
 import { eq , and } from "drizzle-orm";
 
 type role = 'admin' | 'member' | 'owner';
@@ -111,4 +111,71 @@ export async function isValidWorkspace(workspaceId : string , channelId : string
      console.log(err);
      return null;
    }
+}
+
+export async function getWorkspaceById(workspaceId: string, userId: string) {
+  try {
+    // Check if user is a member first
+    const isMember = await isWorkspaceMember(workspaceId, userId);
+    if (!isMember) return null;
+
+    const [workspace] = await db
+      .select({
+        id: wrokspaceTable.id,
+        WorkspaceName: wrokspaceTable.WorkspaceName,
+        Description: wrokspaceTable.Description,
+        createdAt: wrokspaceTable.createdAt,
+        ownerEmail: usersTable.email,   // join to get owner email
+      })
+      .from(wrokspaceTable)
+      .innerJoin(usersTable, eq(wrokspaceTable.userId, usersTable.id))
+      .where(eq(wrokspaceTable.id, workspaceId))
+      .limit(1);
+
+    if (!workspace) return null;
+
+    // Get member count
+    const members = await db
+      .select({ id: WorkspaceMembers.id })
+      .from(WorkspaceMembers)
+      .where(eq(WorkspaceMembers.workspaceId, workspaceId));
+
+    return {
+      ...workspace,
+      memberCount: members.length,
+      plan: "free" as const,   // hardcode for now, or add to schema later
+    };
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+
+export async function deleteWorkspace(workspaceId: string, userId: string) {
+  try {
+    // Only owner can delete
+    const [ownerCheck] = await db
+      .select()
+      .from(WorkspaceMembers)
+      .where(
+        and(
+          eq(WorkspaceMembers.workspaceId, workspaceId),
+          eq(WorkspaceMembers.userId, userId),
+          eq(WorkspaceMembers.role, "owner")
+        )
+      )
+      .limit(1);
+
+    if (!ownerCheck) return { success: false, reason: "forbidden" };
+
+    await db
+      .delete(wrokspaceTable)
+      .where(eq(wrokspaceTable.id, workspaceId));
+
+    return { success: true };
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
 }

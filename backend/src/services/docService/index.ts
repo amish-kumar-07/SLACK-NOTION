@@ -137,3 +137,22 @@ export async function createComment(
     return null;
   }
 }
+
+// DELETE a document by ID
+export async function deleteDocument(docId: string) {
+  try {
+    await db
+      .delete(documentCommentsTable)
+      .where(eq(documentCommentsTable.documentId, docId));
+
+    const [deleted] = await db
+      .delete(documentsTable)
+      .where(eq(documentsTable.id, docId))
+      .returning();
+
+    return deleted ?? null;
+  } catch (err) {
+    console.log(err);
+    return null;
+  }
+}

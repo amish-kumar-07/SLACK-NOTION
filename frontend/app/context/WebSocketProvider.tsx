@@ -66,6 +66,7 @@ type WSContextType = {
     joinChannel: (workspaceId: string, channelId: string) => void;
     leaveChannel: (workspaceId: string, channelId: string) => void;
     sendMessage: (payload: SendMessagePayload) => void;
+    requestPresence: () => void;
     /** Subscribe to incoming WebSocket messages. Returns an unsubscribe function. */
     subscribe: (callback: MessageCallback) => () => void;
 };
@@ -181,6 +182,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         socketRef.current.send(JSON.stringify(payload));
     }, []);
 
+    const requestPresence = useCallback(() => {
+        if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+        socketRef.current.send(JSON.stringify({ type: "GET_PRESENCE" }));
+    }, []);
+
     // ✅ KEY CHANGE: subscribe/unsubscribe system
     const subscribe = useCallback((callback: MessageCallback): (() => void) => {
         subscribersRef.current.add(callback);
@@ -220,6 +226,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             joinChannel,
             leaveChannel,
             sendMessage,
+            requestPresence,
             subscribe,
         }}>
             {children}

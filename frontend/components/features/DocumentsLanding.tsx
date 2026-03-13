@@ -1,10 +1,10 @@
 // components/features/DocumentsLanding.tsx
 'use client';
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   FileText, Plus, Clock, Search, Grid, List,
-  MoreHorizontal, Loader2, AlertCircle, RefreshCw
+  MoreHorizontal, Loader2, AlertCircle, RefreshCw, Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDocuments } from "@/app/hooks/useDocuments";
@@ -16,14 +16,31 @@ interface DocumentsLandingProps {
   channelId: string;
 }
 
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+
 export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingProps) => {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const { documents, isLoading, error } = useDocuments(workspaceId, channelId);
   const prependDocument = useDocumentStore((s) => s.prependDocument);
+  const removeDocument  = useDocumentStore((s) => s.removeDocument);
+
+  // Close menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setActiveMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleDocumentCreated = (doc: Document) => {
     prependDocument(doc);
@@ -33,6 +50,25 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
 
   const handleSelect = (doc: Document) => {
     router.push(`/pages/w/${workspaceId}/c/${channelId}/d/${doc.id}`);
+  };
+
+  const handleDelete = async (e: React.MouseEvent, docId: string) => {
+    e.stopPropagation();
+    setActiveMenu(null);
+    setDeletingId(docId);
+    try {
+      const token = sessionStorage.getItem("CollabAIToken");
+      const res = await fetch(BASE_URL+`/doc/${docId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to delete");
+      removeDocument(docId);
+    } catch (err) {
+      console.error("[DocumentsLanding] delete error:", err);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const filtered = documents.filter((d) =>
@@ -51,7 +87,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -62,8 +97,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
                 className="h-9 w-56 rounded-lg border border-slate-700 bg-slate-900 pl-9 pr-4 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
               />
             </div>
-
-            {/* View Toggle */}
             <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-1 gap-0.5">
               <button
                 onClick={() => setViewMode("grid")}
@@ -78,7 +111,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
                 <List className="w-4 h-4" />
               </button>
             </div>
-
             <Button
               onClick={() => setDrawerOpen(true)}
               className="bg-purple-600 hover:bg-purple-500 text-white gap-2 h-9 px-4 text-sm font-medium"
@@ -91,7 +123,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-8 py-6">
-          {/* Loading */}
           {isLoading && (
             <div className="flex flex-col items-center justify-center h-64 gap-3">
               <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
@@ -99,7 +130,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
             </div>
           )}
 
-          {/* Error */}
           {!isLoading && error && (
             <div className="flex flex-col items-center justify-center h-64 gap-3">
               <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center">
@@ -115,7 +145,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
             </div>
           )}
 
-          {/* Empty */}
           {!isLoading && !error && filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
               <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center">
@@ -135,7 +164,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
             </div>
           )}
 
-          {/* Doc list */}
           {!isLoading && !error && filtered.length > 0 && (
             <section>
               <div className="flex items-center gap-2 mb-4">
@@ -144,25 +172,48 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
                   All Documents
                 </h2>
               </div>
+
               {viewMode === "grid" ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filtered.map((doc) => (
                     <div
                       key={doc.id}
                       onClick={() => handleSelect(doc)}
-                      className="group bg-slate-900 border border-slate-700 hover:border-purple-500/50 rounded-xl p-5 cursor-pointer transition-all hover:bg-slate-800/80 hover:shadow-lg hover:shadow-purple-500/5"
+                      className="group relative bg-slate-900 border border-slate-700 hover:border-purple-500/50 rounded-xl p-5 cursor-pointer transition-all hover:bg-slate-800/80 hover:shadow-lg hover:shadow-purple-500/5"
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
                           <FileText className="w-5 h-5 text-blue-400" />
                         </div>
-                        <button
-                          onClick={(e) => e.stopPropagation()}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
-                        >
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
+
+                        {/* 3-dot menu */}
+                        <div className="relative" ref={activeMenu === doc.id ? menuRef : null}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenu(activeMenu === doc.id ? null : doc.id);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
+                          >
+                            {deletingId === doc.id
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : <MoreHorizontal className="w-4 h-4" />
+                            }
+                          </button>
+                          {activeMenu === doc.id && (
+                            <div className="absolute right-0 top-7 z-50 w-36 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                              <button
+                                onClick={(e) => handleDelete(e, doc.id)}
+                                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
+
                       <h3 className="font-semibold text-white text-sm mb-1.5 truncate">{doc.title}</h3>
                       <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-4 pt-3 border-t border-slate-700/60">
                         <Clock className="w-3.5 h-3.5" />
@@ -188,12 +239,33 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
                           Created {new Date(doc.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                         </p>
                       </div>
-                      <button
-                        onClick={(e) => e.stopPropagation()}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
-                      >
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
+
+                      {/* 3-dot menu for list view */}
+                      <div className="relative" ref={activeMenu === doc.id ? menuRef : null}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenu(activeMenu === doc.id ? null : doc.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
+                        >
+                          {deletingId === doc.id
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <MoreHorizontal className="w-4 h-4" />
+                          }
+                        </button>
+                        {activeMenu === doc.id && (
+                          <div className="absolute right-0 top-7 z-50 w-36 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                            <button
+                              onClick={(e) => handleDelete(e, doc.id)}
+                              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -201,7 +273,6 @@ export const DocumentsLanding = ({ workspaceId, channelId }: DocumentsLandingPro
             </section>
           )}
 
-          {/* Create CTA at bottom */}
           {!isLoading && !error && (
             <div
               onClick={() => setDrawerOpen(true)}

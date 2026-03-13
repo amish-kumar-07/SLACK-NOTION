@@ -17,7 +17,7 @@ const modeNames = {
 };
 
 export default function WorkspacePage() {
-  const params = useParams();
+  const params = useParams<{ workspaceId: string; channelId: string }>();
 
   const workspaceId = params.workspaceId?.toString();
   const channelId = params.channelId?.toString();
@@ -25,6 +25,15 @@ export default function WorkspacePage() {
   const didConnect = useRef(false);
 
   const { connect, disconnect, joinChannel, leaveChannel, isConnected } = useWebSocket();
+
+  // Refs so cleanup always has the latest values regardless of closure staleness
+  const workspaceIdRef = useRef(workspaceId);
+  const channelIdRef   = useRef(channelId);
+  const leaveChannelRef = useRef(leaveChannel);
+
+  useEffect(() => { workspaceIdRef.current = workspaceId; }, [workspaceId]);
+  useEffect(() => { channelIdRef.current = channelId; }, [channelId]);
+  useEffect(() => { leaveChannelRef.current = leaveChannel; }, [leaveChannel]);
 
   if (!workspaceId || !channelId) {
     router.push("/pages/dashboard");
@@ -44,7 +53,8 @@ export default function WorkspacePage() {
     if (!isConnected) return;
     joinChannel(workspaceId, channelId);
     return () => {
-      if (isConnected) leaveChannel(workspaceId, channelId);
+      // Use ref values — guaranteed to be current even during unmount
+      leaveChannelRef.current(workspaceIdRef.current, channelIdRef.current);
     };
   }, [workspaceId, channelId, isConnected]);
 

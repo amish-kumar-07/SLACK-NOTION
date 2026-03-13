@@ -18,6 +18,7 @@ interface DocumentStore {
   error: string | null;
   setDocuments: (docs: Document[]) => void;
   prependDocument: (doc: Document) => void;
+  removeDocument: (docId: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -37,6 +38,12 @@ export const useDocumentStore = create<DocumentStore>((set) => ({
 
   prependDocument: (doc) =>
     set((state) => ({ documents: [doc, ...state.documents] })),
+
+  // ── NEW: remove a doc by id (optimistic delete) ──
+  removeDocument: (docId) =>
+    set((state) => ({
+      documents: state.documents.filter((d) => d.id !== docId),
+    })),
 
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
