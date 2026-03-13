@@ -26,7 +26,7 @@ export interface IncomingMessage {
     type: string;
     data?: {
         id?: string;
-        messageId?: string;       // for message:edited and message:deleted events
+        messageId?: string;
         channelId: string;
         content: string;
         userId: string;
@@ -35,7 +35,6 @@ export interface IncomingMessage {
         tempId?: string;
         threadId?: string | null;
         parentMessageId?: string | null;
-        // ✅ parent message snapshot — so reply badge works for incoming WS messages too
         parentMessage?: {
             id: string;
             content: string | null;
@@ -67,11 +66,17 @@ type WSContextType = {
     leaveChannel: (workspaceId: string, channelId: string) => void;
     sendMessage: (payload: SendMessagePayload) => void;
     requestPresence: () => void;
-    /** Subscribe to incoming WebSocket messages. Returns an unsubscribe function. */
     subscribe: (callback: MessageCallback) => () => void;
 };
 
 const WSContext = createContext<WSContextType | null>(null);
+
+// ========================================
+// RECONNECT CONFIG
+// ========================================
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS  = 30000;
+const RECONNECT_MAX_ATTEMPTS  = 10;
 
 // ========================================
 // PROVIDER
@@ -81,15 +86,25 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const [isConnected, setIsConnected] = useState(false);
     const toast = useToast();
 
-    // Subscriber registry: all components that want to listen to messages
+    // Subscriber registry
     const subscribersRef = useRef<Set<MessageCallback>>(new Set());
 
-    // Dispatch incoming messages to all subscribers
+    // Reconnect state
+    const intentionalCloseRef = useRef(false);
+    const reconnectAttemptRef = useRef(0);
+    const reconnectTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Last known channel — for auto-rejoin after reconnect
+    const lastChannelRef = useRef<{ workspaceId: string; channelId: string } | null>(null);
+
+    // Pending join — for when joinChannel fires before socket is OPEN
+    const pendingJoinRef = useRef<{ workspaceId: string; channelId: string } | null>(null);
+
     const dispatch = useCallback((message: IncomingMessage) => {
         subscribersRef.current.forEach((cb) => cb(message));
     }, []);
 
-    const connect = useCallback(() => {
+    const connectInternal = useCallback((isReconnect = false) => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
             console.log("✅ WebSocket already connected");
             return;
@@ -103,17 +118,40 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         const token = sessionStorage.getItem('CollabAIToken');
         if (!token) {
             console.warn("❌ No token found");
-            toast.warning("No token found. Login Again!");
+            if (!isReconnect) toast.warning("No token found. Login Again!");
             return;
         }
 
-        console.log("🔌 Connecting WebSocket...");
-        const socket = new WebSocket(`${BASE_URL}/ws/c?token=${token}`);
+        console.log(isReconnect
+            ? `🔄 Reconnecting WebSocket (attempt ${reconnectAttemptRef.current})...`
+            : "🔌 Connecting WebSocket..."
+        );
+
+        // WebSocket requires wss:// (not https://) — convert scheme
+        const wsBase = BASE_URL
+            .replace(/^https:\/\//, "wss://")
+            .replace(/^http:\/\//, "ws://");
+        const socket = new WebSocket(`${wsBase}/ws/c?token=${token}`);
         socketRef.current = socket;
 
         socket.onopen = () => {
             console.log('✅ WebSocket connected');
+            reconnectAttemptRef.current = 0;
             setIsConnected(true);
+
+            // Priority: pendingJoin (set before socket opened) > lastChannel (reconnect)
+            const toJoin = pendingJoinRef.current ?? (isReconnect ? lastChannelRef.current : null);
+
+            if (toJoin) {
+                console.log(`🔗 Sending JOIN_CHANNEL on open for channel ${toJoin.channelId}`);
+                socket.send(JSON.stringify({
+                    type: 'JOIN_CHANNEL',
+                    workspaceId: toJoin.workspaceId,
+                    channelId: toJoin.channelId,
+                }));
+                lastChannelRef.current = toJoin;
+                pendingJoinRef.current = null;
+            }
         };
 
         socket.onerror = (error) => {
@@ -123,9 +161,26 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         socket.onclose = () => {
             console.log('🔌 WebSocket disconnected');
             setIsConnected(false);
+
+            if (intentionalCloseRef.current) {
+                intentionalCloseRef.current = false;
+                return;
+            }
+
+            if (reconnectAttemptRef.current < RECONNECT_MAX_ATTEMPTS) {
+                const delay = Math.min(
+                    RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttemptRef.current,
+                    RECONNECT_MAX_DELAY_MS
+                );
+                reconnectAttemptRef.current += 1;
+                console.log(`⏳ Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current}/${RECONNECT_MAX_ATTEMPTS})`);
+                reconnectTimerRef.current = setTimeout(() => connectInternal(true), delay);
+            } else {
+                console.warn("❌ Max reconnect attempts reached. Giving up.");
+                toast.warning("Connection lost. Please refresh the page.");
+            }
         };
 
-        // ✅ KEY CHANGE: Dispatch all incoming messages to subscribers
         socket.onmessage = (event) => {
             try {
                 const message: IncomingMessage = JSON.parse(event.data);
@@ -137,21 +192,40 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         };
     }, [toast, dispatch]);
 
+    const connect = useCallback(() => {
+        intentionalCloseRef.current = false;
+        reconnectAttemptRef.current = 0;
+        connectInternal(false);
+    }, [connectInternal]);
+
     const disconnect = useCallback(() => {
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
         if (socketRef.current) {
             console.log("🔌 Disconnecting WebSocket...");
+            intentionalCloseRef.current = true;
             socketRef.current.close();
             socketRef.current = null;
             setIsConnected(false);
         }
+        pendingJoinRef.current = null;
+        lastChannelRef.current = null;
     }, []);
 
     const joinChannel = useCallback((workspaceId: string, channelId: string) => {
+        // Always store as last known channel
+        lastChannelRef.current = { workspaceId, channelId };
+
         if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-            console.warn("⚠️ WebSocket not connected when trying to join channel");
+            // Queue it — will be sent in socket.onopen
+            console.log(`⏳ Socket not ready — queuing JOIN_CHANNEL for channel ${channelId}`);
+            pendingJoinRef.current = { workspaceId, channelId };
             return;
         }
 
+        pendingJoinRef.current = null;
         console.log(`🔍 Joining channel: ${channelId} in workspace: ${workspaceId}`);
         socketRef.current.send(JSON.stringify({
             type: 'JOIN_CHANNEL',
@@ -161,6 +235,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const leaveChannel = useCallback((workspaceId: string, channelId: string) => {
+        // Clear both refs so we don't auto-rejoin
+        lastChannelRef.current = null;
+        pendingJoinRef.current = null;
+
         if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
             return;
         }
@@ -178,7 +256,6 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             console.warn("⚠️ WebSocket not connected when trying to send message");
             return;
         }
-
         socketRef.current.send(JSON.stringify(payload));
     }, []);
 
@@ -187,10 +264,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         socketRef.current.send(JSON.stringify({ type: "GET_PRESENCE" }));
     }, []);
 
-    // ✅ KEY CHANGE: subscribe/unsubscribe system
     const subscribe = useCallback((callback: MessageCallback): (() => void) => {
         subscribersRef.current.add(callback);
-        // Return an unsubscribe function
         return () => {
             subscribersRef.current.delete(callback);
         };
@@ -213,9 +288,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             }
         }, 25000);
 
-        return () => {
-            clearInterval(interval);
-        };
+        return () => clearInterval(interval);
     }, [isConnected]);
 
     return (
