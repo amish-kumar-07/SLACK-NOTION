@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Document } from "@/app/store/useDocumentStore";
 
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL!;
+
 interface CreateDocumentDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -37,7 +39,7 @@ export const CreateDocumentDrawer = ({
     setError(null);
     try {
       const token = sessionStorage.getItem("CollabAIToken");
-      const res = await fetch("http://localhost:4000/doc/create", {
+      const res = await fetch(`${BASE_URL}/doc/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
